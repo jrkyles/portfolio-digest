@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output — regenerate with `npm run build`
+dist/
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-error.log*

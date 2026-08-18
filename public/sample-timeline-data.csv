@@ -1,0 +1,52 @@
+Year,Quarter,Month,Day,Team,Project,Status,Leads,Effort,Departments,Description,Sum of Label Row Signed
+2026,Qtr 1,January,7,IO,Document Intake Automation,Not Started,"Jordan Patel
+Priya Raghavan",Dual,"Audit, Human Resources",Scoping a common intake path to reduce duplicated effort.,0
+2026,Qtr 1,January,20,IO,Quarterly Insights Digest,In Progress,"Sam Okafor
+Noel Kaminski
+Casey Lindqvist",IO,"Human Resources, Operations",Streamlining a repeatable workflow to shorten turnaround time.,0
+2026,Qtr 1,March,7,IO,Vendor Evaluation Scorecard Refresh,Not Started,"Sam Okafor
+Priya Raghavan",SPG,"Bank-Wide, Risk",Streamlining a shared reference process to cut manual handoffs.,0
+2026,Qtr 1,February,26,SPG,Onboarding Walkthrough Video,In Progress,Riley Nakamura,SPG,Human Resources,Standing up a self-service entry point to make the current state easier to audit.,0
+2026,Qtr 1,March,4,SPG,Records Retention Cleanup,On Hold,Toni Alvarez,Dual,Operations,Refreshing a lightweight review process to shorten turnaround time.,0
+2026,Qtr 2,June,1,IO,Service Desk Triage Assistant,In Progress,"Sam Okafor
+Devon Whitfield
+Avery Chen",IO,Finance,Consolidating an internal reporting path so teams stop maintaining parallel copies.,0
+2026,Qtr 2,June,8,IO,Meeting Notes Summarization Pilot,In Progress,"Devon Whitfield
+Avery Chen
+Jordan Patel",SPG,Bank-Wide,Streamlining a repeatable workflow so teams stop maintaining parallel copies.,0
+2026,Qtr 2,June,13,IO,Cross-Team Collaboration Charter,In Progress,"Riley Nakamura
+Casey Lindqvist
+Sam Okafor",SPG,"Finance, Procurement",Evaluating a common intake path so teams stop maintaining parallel copies.,0
+2026,Qtr 2,May,6,IO,Data Quality Baseline Framework,In Progress,"Priya Raghavan
+Toni Alvarez",Dual,IT Services,Streamlining a self-service entry point to reduce duplicated effort.,0
+2026,Qtr 2,May,23,IO,Staff Enablement Training Program,In Progress,"Devon Whitfield
+Jordan Patel
+Riley Nakamura",Dual,IT Services,Piloting a common intake path so teams stop maintaining parallel copies.,0
+2026,Qtr 2,May,26,IO,Forms Digitization,In Progress,"Priya Raghavan
+Toni Alvarez
+Devon Whitfield",SPG,Risk,Scoping a common intake path to make the current state easier to audit.,0
+2026,Qtr 2,May,27,IO,Sandbox Environment Access,In Progress,"Jordan Patel
+Priya Raghavan
+Casey Lindqvist",Dual,"IT Services, Audit",Scoping a shared reference process to make the current state easier to audit.,0
+2026,Qtr 2,May,13,IO,Contract Review Accelerator,In Progress,"Riley Nakamura
+Sam Okafor
+Jordan Patel",Dual,Human Resources,Piloting a repeatable workflow so teams stop maintaining parallel copies.,0
+2026,Qtr 2,April,10,SPG,Internal Tooling Showcase,Not Started,"Riley Nakamura
+Casey Lindqvist",IO,"Risk, IT Services",Standing up a lightweight review process to shorten turnaround time.,0
+2026,Qtr 3,July,24,IO,Workflow Metrics Dashboard,In Progress,Toni Alvarez,SPG,Research,Standing up a repeatable workflow so teams stop maintaining parallel copies.,0
+2026,Qtr 3,September,5,IO,Policy Lookup Assistant,In Progress,Devon Whitfield,Dual,"Finance, Research",Streamlining a self-service entry point so teams stop maintaining parallel copies.,0
+2026,Qtr 3,September,13,IO,Translation Support Pilot,In Progress,Morgan Reyes,Dual,Operations,Consolidating a repeatable workflow so teams stop maintaining parallel copies.,0
+2026,Qtr 3,July,13,SPG,Adoption Playbook,In Progress,"Devon Whitfield
+Riley Nakamura
+Toni Alvarez",SPG,Finance,Evaluating a self-service entry point to make the current state easier to audit.,0
+2026,Qtr 3,July,10,SPG,Feedback Loop Program,In Progress,"Avery Chen
+Jordan Patel",Dual,Bank-Wide,Scoping a self-service entry point to make the current state easier to audit.,0
+2026,Qtr 4,December,16,IO,Reporting Consolidation,Completed,"Toni Alvarez
+Avery Chen
+Priya Raghavan",Dual,Finance,Consolidating a shared reference process to cut manual handoffs.,0
+2026,Qtr 4,December,4,IO,Access Request Streamlining,In Progress,Noel Kaminski,Dual,"Audit, Legal",Refreshing a self-service entry point to cut manual handoffs.,0
+2026,Qtr 4,November,1,IO,Archive Search Improvements,In Progress,"Jordan Patel
+Devon Whitfield",IO,"Operations, Bank-Wide",Standing up an internal reporting path to cut manual handoffs.,0
+2026,Qtr 4,November,24,IO,Year-End Readiness Review,In Progress,"Casey Lindqvist
+Avery Chen",IO,"Procurement, Legal",Evaluating an internal reporting path so teams stop maintaining parallel copies.,0
+2026,Qtr 4,October,23,SPG,Capability Roadmap Refresh,Completed,Devon Whitfield,IO,"Audit, Human Resources",Standing up a self-service entry point to reduce duplicated effort.,0
