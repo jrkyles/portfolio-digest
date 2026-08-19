@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 import { motion } from 'framer-motion'
-import { Calendar, Users, Building2, FileText, X } from 'lucide-react'
+import { Calendar, Users, Building2, FileText, Tag, X } from 'lucide-react'
 import { CARD_TRANSITION, PANEL_WIDTH_MIN, PANEL_WIDTH_VW, PANEL_WIDTH_MAX, getTeamColor, PRIMARY_COLOR, SECONDARY_COLOR } from '../layout/constants'
 
 /**
@@ -116,6 +116,22 @@ const DetailPanel = forwardRef(function DetailPanel({ project, onClose, onMouseE
           >
             {project.Status}
           </span>
+          {/* Label is a classification (what KIND of work), as opposed to Team (who owns it)
+              and Status (how far along). Outlined rather than filled so it reads as a
+              third, quieter axis instead of competing with the two solid pills. */}
+          {project.Label && project.Label.trim() && (
+            <span
+              className={isPopup ? 'px-3 py-1 text-xs font-semibold rounded-full border' : 'px-3.5 py-1.5 text-sm font-semibold rounded-full border'}
+              style={{
+                fontFamily: 'Calibri, Arial, sans-serif',
+                borderColor: teamColor,
+                color: teamColor,
+                backgroundColor: 'transparent',
+              }}
+            >
+              {project.Label}
+            </span>
+          )}
         </div>
         <h2
           className={isPopup ? 'text-xl leading-tight' : 'text-3xl leading-tight'}
@@ -157,6 +173,13 @@ const DetailPanel = forwardRef(function DetailPanel({ project, onClose, onMouseE
             </div>
             <p className={isPopup ? 'text-sm font-bold' : 'text-lg font-bold'} style={{ fontFamily: 'Calibri, Arial, sans-serif' }}>
               {project.Effort || 'N/A'}
+            </p>
+            <div className="flex items-center gap-2 mb-2 mt-3 text-neutral-500">
+              <Tag className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide font-semibold">Label</span>
+            </div>
+            <p className={isPopup ? 'text-sm font-bold' : 'text-lg font-bold'} style={{ fontFamily: 'Calibri, Arial, sans-serif' }}>
+              {project.Label || 'N/A'}
             </p>
           </div>
         </div>

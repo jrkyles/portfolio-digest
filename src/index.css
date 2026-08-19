@@ -63,3 +63,108 @@
     scrollbar-color: #cbd5e1 #f1f5f9;
   }
 }
+
+/* ============================================================================
+   PRINT / "Save as PDF"  —  see components/PrintSheet.jsx
+   ---------------------------------------------------------------------------
+   Ctrl+P swaps the whole dashboard for a single-page spreadsheet. The dashboard
+   itself is deliberately NOT printed: it's a transform-scaled absolute layout
+   whose quarter boxes scroll internally, so on paper it would either clip or
+   shrink past legibility, and anything below a box's fold wouldn't exist at all.
+   ========================================================================== */
+
+/* Hidden on screen; the only thing visible on paper. */
+.print-only { display: none; }
+
+@media print {
+  /* Landscape gives the Description column room to breathe - it carries the most
+     text by a wide margin, and in portrait it wraps to the point of doubling the
+     row count and pushing onto a second page. */
+  @page { size: landscape; margin: 12mm; }
+
+  html, body {
+    background: #fff !important;
+    color: #000;
+    /* The app scales type down at narrow widths; print has its own scale. */
+    font-size: 12px;
+  }
+
+  /* Hide the live app wholesale rather than per-element - it's one subtree. */
+  body > div > *:not(.print-only) { display: none !important; }
+  .print-only { display: block !important; }
+
+  .print-sheet {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #16202C;
+  }
+
+  .print-head {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 16px; padding-bottom: 8px; margin-bottom: 10px;
+    border-bottom: 2px solid #0A253E;
+  }
+  .print-eyebrow {
+    margin: 0 0 2px; font-size: 7.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: #5A6675;
+  }
+  .print-title {
+    margin: 0; font-family: Georgia, "Times New Roman", serif;
+    font-weight: 400; font-size: 20px; line-height: 1; color: #0A253E;
+  }
+  .print-title span { font-size: 11px; color: #8B96A3; letter-spacing: .1em; }
+  .print-meta { margin: 0; font-size: 9px; color: #5A6675; font-variant-numeric: tabular-nums; }
+
+  .print-table {
+    width: 100%; border-collapse: collapse;
+    table-layout: fixed;      /* honour the column widths below rather than
+                                 letting Description swallow the row */
+    font-size: 8px; line-height: 1.32;
+  }
+
+  .print-table th {
+    background: #0A253E; color: #fff;
+    font-size: 7.5px; letter-spacing: .08em; text-transform: uppercase;
+    text-align: left; padding: 5px 6px; border: .5px solid #0A253E;
+  }
+
+  .print-table td {
+    padding: 4px 6px; border: .5px solid #C6CED6;
+    vertical-align: top; word-break: break-word;
+  }
+
+  /* The two colour-coded columns. Centred and slightly heavier so the page can be
+     scanned by colour alone, the way the source sheet is. */
+  .print-table td.fill {
+    text-align: center; font-weight: 600; font-size: 7.5px;
+    /* Backgrounds are the entire point of these cells, so force them through the
+       browser's default "don't waste ink" behaviour. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Column widths, tuned so Description gets roughly half the page and the fixed
+     fields stay on one line each. */
+  .print-table .c-status { width: 7.5%; }
+  .print-table .c-effort { width: 5%; }
+  .print-table .c-label  { width: 8%; }
+  .print-table .c-task   { width: 16%; font-weight: 600; }
+  .print-table .c-leads  { width: 8.5%; }
+  .print-table .c-dept   { width: 10%; }
+  .print-table .c-desc   { width: 45%; }
+
+  /* Each lead on its own line, mirroring the stacked cells in the source sheet. */
+  .print-table .c-leads span { display: block; }
+
+  /* Zebra striping survives onto paper only with color-adjust; keep it very light
+     so it aids row tracking without competing with the status fills. */
+  .print-table tbody tr:nth-child(even) td:not(.fill) {
+    background: #F4F6F8;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Never split a task across a page break, and repeat the header if the data
+     ever does outgrow a single page. */
+  .print-table tr { page-break-inside: avoid; break-inside: avoid; }
+  .print-table thead { display: table-header-group; }
+}

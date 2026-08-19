@@ -11,6 +11,7 @@ const baseProject = {
   Day: '15',
   Quarter: 'Qtr 2',
   Effort: 'Dual',
+  Label: 'Strategic',
   Leads: 'Avery Chen\nJordan Patel',
   Departments: 'Legal, Research',
   Description: 'Assessing vendor risk across the portfolio.',
@@ -49,9 +50,26 @@ describe('DetailPanel', () => {
     expect(screen.queryByText('Description')).not.toBeInTheDocument()
   })
 
-  it('falls back to N/A when Effort is missing', () => {
-    render(<DetailPanel project={{ ...baseProject, Effort: '' }} onClose={() => {}} />)
-    expect(screen.getByText('N/A')).toBeInTheDocument()
+  it('falls back to N/A for whichever of Effort / Label is missing', () => {
+    // Both share the quick-stats cell and both fall back to N/A, so assert on counts
+    // rather than a bare getByText, which is ambiguous once either one is blank.
+    const { rerender } = render(
+      <DetailPanel project={{ ...baseProject, Effort: '' }} onClose={() => {}} />
+    )
+    expect(screen.getAllByText('N/A')).toHaveLength(1)
+    expect(screen.getAllByText('Strategic')).toHaveLength(2)   // header pill + stats cell
+
+    rerender(<DetailPanel project={{ ...baseProject, Effort: '', Label: '' }} onClose={() => {}} />)
+    expect(screen.getAllByText('N/A')).toHaveLength(2)
+  })
+
+  it('shows Label as a pill alongside Team and Status, and omits it when blank', () => {
+    const { rerender } = render(<DetailPanel project={baseProject} onClose={() => {}} />)
+    // Appears twice: once as the header pill, once in the quick-stats cell.
+    expect(screen.getAllByText('Strategic')).toHaveLength(2)
+
+    rerender(<DetailPanel project={{ ...baseProject, Label: '' }} onClose={() => {}} />)
+    expect(screen.queryByText('Strategic')).not.toBeInTheDocument()
   })
 
   describe('variant="popup" (Quarter View)', () => {

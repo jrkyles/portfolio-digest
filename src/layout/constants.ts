@@ -61,6 +61,11 @@ export const PUSH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
 // at something, long enough that passing through costs nothing.
 export const HOVER_ENTER_DELAY_MS = 110
 
+// Maximum magnetic tilt, in degrees, at the very corner of a card. Small on purpose: these
+// are small cards viewed at a distance, and anything past ~4 degrees stops reading as depth
+// and starts reading as the card being knocked askew.
+export const TILT_MAX_DEG = 3
+
 // Detail panel width, in real screen px (NOT design space - the panel is a fixed-position
 // overlay, not part of the scaled stage). DetailPanel.jsx's own CSS width and ScaledStage's
 // timeline-avoidance squeeze both derive from these same numbers so they can't drift apart.

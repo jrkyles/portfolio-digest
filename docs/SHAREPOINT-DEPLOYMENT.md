@@ -63,6 +63,7 @@ Install-Module PnP.PowerShell -Scope CurrentUser
 | `Day`         | Single line     |          | Day of month. |
 | `Leads`       | Multiple lines  |          | One name per line — the app splits on newlines into chips. |
 | `Effort`      | Single line     |          | See the note in §5. |
+| `Label`       | Single line     |          | Classification tag (e.g. Quick Win, Compliance). Shown as a pill beside Team/Status. |
 | `Departments` | Single line     |          | Comma-separated — split into chips. |
 | `Description` | Multiple lines  |          | Shown in the detail panel. |
 | `Year`        | Single line     |          | Currently display-only. |

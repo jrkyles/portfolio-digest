@@ -38,7 +38,7 @@ function growInPlace(rest, expandedWidth, expandedHeight, isAbove, boundsWidth) 
   }
 }
 
-export default function ProjectSection({ label, color, projects, isAbove, onProjectClick, measurements, isTransitioning }) {
+export default function ProjectSection({ label, color, projects, isAbove, onProjectClick, onProjectPresent, measurements, isTransitioning }) {
   const [hoveredProjectIndex, setHoveredProjectIndex] = useState(null)
 
   // Entering a card ARMS a short timer rather than expanding immediately; leaving disarms it.
@@ -295,6 +295,7 @@ export default function ProjectSection({ label, color, projects, isAbove, onProj
             mountDelay={1.4 + idx * 0.05}
             teamColor={color}
             onProjectClick={onProjectClick}
+            onProjectPresent={onProjectPresent}
             isHovered={isHovered}
             measured={measured}
             onHoverChange={(hovered) => handleHoverChange(idx, hovered)}

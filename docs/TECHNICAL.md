@@ -336,6 +336,7 @@ a warning rather than throwing, so one bad row cannot take down the dashboard.
 | `Day` | Text | | Due date, detail panel |
 | `Leads` | Note | | Split on `\n` into chips |
 | `Effort` | Text | | Rendered verbatim in the quick-stats grid |
+| `Label` | Text | | Classification tag; pill in the detail header + quick-stats + print column |
 | `Departments` | Text | | Split on `,` into chips |
 | `Description` | Note | | Detail panel body |
 | `Year` | Text | | Carried through; not currently rendered |

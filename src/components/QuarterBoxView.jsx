@@ -20,7 +20,7 @@ const QUARTERS = ['Qtr 1', 'Qtr 2', 'Qtr 3', 'Qtr 4']
  * grows it smoothly from where it was instead of cutting to a new layout. The other three
  * boxes fade out while zoomed; Escape, the scrim, or the close button return to the grid.
  */
-export default function QuarterBoxView({ projects, onProjectClick, isTransitioning }) {
+export default function QuarterBoxView({ projects, onProjectClick, onProjectPresent, isTransitioning }) {
   const [zoomedQuarter, setZoomedQuarter] = useState(null)
 
   const byQuarter = useMemo(() => {
@@ -67,6 +67,7 @@ export default function QuarterBoxView({ projects, onProjectClick, isTransitioni
                 qIdx={qIdx}
                 projects={byQuarter.get(quarter) || []}
                 onProjectClick={onProjectClick}
+                onProjectPresent={onProjectPresent}
                 isTransitioning={isTransitioning}
                 onZoom={() => setZoomedQuarter(quarter)}
               />
@@ -108,6 +109,7 @@ export default function QuarterBoxView({ projects, onProjectClick, isTransitioni
                 qIdx={QUARTERS.indexOf(zoomedQuarter)}
                 projects={byQuarter.get(zoomedQuarter) || []}
                 onProjectClick={onProjectClick}
+                onProjectPresent={onProjectPresent}
                 isTransitioning={isTransitioning}
                 zoomed
                 onClose={() => setZoomedQuarter(null)}
@@ -127,7 +129,7 @@ export default function QuarterBoxView({ projects, onProjectClick, isTransitioni
  * components cannot be given refs"), leaving popLayout measuring nothing.
  */
 const QuarterBox = forwardRef(function QuarterBox(
-  { quarter, qIdx, projects, onProjectClick, isTransitioning, onZoom, zoomed = false, onClose },
+  { quarter, qIdx, projects, onProjectClick, onProjectPresent, isTransitioning, onZoom, zoomed = false, onClose },
   ref,
 ) {
   const label = quarter.replace('Qtr ', 'Q')
@@ -242,7 +244,7 @@ const QuarterBox = forwardRef(function QuarterBox(
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...CARD_TRANSITION, delay: zoomed ? idx * 0.03 : 0 }}
               >
-                <QuarterBoxCard project={project} onProjectClick={onProjectClick} isTransitioning={isTransitioning} />
+                <QuarterBoxCard project={project} onProjectClick={onProjectClick} onProjectPresent={onProjectPresent} isTransitioning={isTransitioning} />
               </motion.div>
             ))}
           </LayoutGroup>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CARD_TRANSITION, getTeamColor } from '../layout/constants'
+import { CARD_TRANSITION, getTeamColor, TILT_MAX_DEG } from '../layout/constants'
 import { getProjectId } from '../utils/dataParser'
 
 /**
@@ -30,8 +30,19 @@ import { getProjectId } from '../utils/dataParser'
  * other popping in. It stays off otherwise so it can't interfere with the always-on `layout`
  * prop's normal job of smoothly reflowing sibling cards on hover-expand.
  */
-export default function QuarterBoxCard({ project, onProjectClick, isTransitioning = false }) {
+export default function QuarterBoxCard({ project, onProjectClick, onProjectPresent = () => {}, isTransitioning = false }) {
   const [isHovered, setIsHovered] = useState(false)
+
+  // Magnetic tilt - see ProjectCardSimple for why this lives on its own nested element
+  // rather than being folded into the card's own animated transform.
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 })
+  const handleTilt = (e) => {
+    const b = e.currentTarget.getBoundingClientRect()
+    if (!b.width || !b.height) return
+    const px = (e.clientX - b.left) / b.width - 0.5
+    const py = (e.clientY - b.top) / b.height - 0.5
+    setTilt({ rx: -py * TILT_MAX_DEG * 2, ry: px * TILT_MAX_DEG * 2 })
+  }
   const teamColor = getTeamColor(project.Team)
   const projectId = getProjectId(project)
 
@@ -48,8 +59,13 @@ export default function QuarterBoxCard({ project, onProjectClick, isTransitionin
         e.stopPropagation()
         handleActivate()
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        onProjectPresent(project)
+      }}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseMove={handleTilt}
+      onMouseLeave={() => { setIsHovered(false); setTilt({ rx: 0, ry: 0 }) }}
       onFocus={() => setIsHovered(true)}
       onBlur={() => setIsHovered(false)}
       tabIndex={0}
@@ -71,6 +87,15 @@ export default function QuarterBoxCard({ project, onProjectClick, isTransitionin
         paddingRight: 12,
       }}
     >
+      <div
+        style={{
+          transform: isHovered
+            ? `perspective(760px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`
+            : 'none',
+          transition: `transform ${isHovered ? 90 : 260}ms ease-out`,
+          transformStyle: 'preserve-3d',
+        }}
+      >
       <motion.div
         layout="position"
         className="leading-tight mb-0.5 font-bold"
@@ -114,6 +139,7 @@ export default function QuarterBoxCard({ project, onProjectClick, isTransitionin
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </motion.div>
   )
 }

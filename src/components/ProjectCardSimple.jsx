@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { CARD_MIN_WIDTH } from '../layout/constants'
+import { CARD_MIN_WIDTH, TILT_MAX_DEG } from '../layout/constants'
 
 /**
  * A single timeline card, rebuilt so that geometry is driven ENTIRELY by CSS transitions.
@@ -35,6 +35,7 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
   mountDelay = 0,
   teamColor,
   onProjectClick,
+  onProjectPresent = () => {},
   isHovered = false,
   onHoverChange = () => {},
 }) {
@@ -64,6 +65,26 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
   const handleActivate = () => onProjectClick(project)
   const hit = hitRect || rect
 
+  // Magnetic tilt. Tracked on the stationary hit target, never the moving visual - reading
+  // pointer position off something that is itself animating would feed the card's own motion
+  // back into the tilt.
+  //
+  // The tilt is applied to a NESTED element rather than the card root. The root's transform
+  // is the position/size animation and carries a 240ms transition; adding rotation there
+  // would either drag the tilt 240ms behind the cursor or force the position transition to
+  // be fast enough to keep up. Separate elements let each run on its own clock: position
+  // eases, tilt tracks instantly.
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 })
+  const handleTilt = (e) => {
+    const b = e.currentTarget.getBoundingClientRect()
+    if (!b.width || !b.height) return
+    const px = (e.clientX - b.left) / b.width - 0.5   // -0.5 … 0.5
+    const py = (e.clientY - b.top) / b.height - 0.5
+    // Inverted on X so the card leans TOWARD the cursor rather than away from it.
+    setTilt({ rx: -py * TILT_MAX_DEG * 2, ry: px * TILT_MAX_DEG * 2 })
+  }
+  const resetTilt = () => setTilt({ rx: 0, ry: 0 })
+
   return (
     <>
       <div
@@ -83,12 +104,17 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
         aria-label={`${project.Project}, ${project.Status}`}
         data-project-card={projectId}
         onMouseEnter={() => onHoverChange(true)}
-        onMouseLeave={() => onHoverChange(false)}
+        onMouseMove={handleTilt}
+        onMouseLeave={() => { onHoverChange(false); resetTilt() }}
         onFocus={() => onHoverChange(true)}
         onBlur={() => onHoverChange(false)}
         onClick={(e) => {
           e.stopPropagation()
           handleActivate()
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          onProjectPresent(project)
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -117,6 +143,20 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
           pointerEvents: 'none',
         }}
       >
+        {/* Tilt layer. Its own transform, its own (much shorter) transition, so it can track
+            the cursor without the position animation having to. Only ever active while
+            hovered, so a resting card carries no transform of its own. */}
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            transform: isHovered
+              ? `perspective(620px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`
+              : 'none',
+            transition: `transform ${isHovered ? 90 : 260}ms ease-out`,
+            transformStyle: 'preserve-3d',
+          }}
+        >
         <div
           style={{
             // Always 100% of the OUTER box's own currently-animating width (never an
@@ -172,6 +212,7 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </>

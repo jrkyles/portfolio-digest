@@ -27,6 +27,7 @@ export interface Project {
   Status: string
   Leads: string
   Effort: string
+  Label: string
   Departments: string
   Description: string
   'Sum of Label Row Signed': string

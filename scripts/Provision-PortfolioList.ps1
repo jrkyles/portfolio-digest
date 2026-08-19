@@ -56,6 +56,7 @@ $columns = @(
   @{ Internal = "Status";      Display = "Status";                  Type = "Text" },
   @{ Internal = "Leads";       Display = "Leads";                   Type = "Note" },
   @{ Internal = "Effort";      Display = "Effort";                  Type = "Text" },
+  @{ Internal = "Label";       Display = "Label";                   Type = "Text" },
   @{ Internal = "Departments"; Display = "Departments";             Type = "Text" },
   @{ Internal = "Description"; Display = "Description";             Type = "Note" }
 )
@@ -95,6 +96,7 @@ if ($SeedFromCsv) {
       Status      = $r.Status
       Leads       = $r.Leads
       Effort      = $r.Effort
+      Label       = $r.Label
       Departments = $r.Departments
       Description = $r.Description
     } | Out-Null

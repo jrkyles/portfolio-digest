@@ -27,6 +27,7 @@ interface SharePointListItem {
   Status: string
   Leads: string
   Effort: string
+  Label: string
   Departments: string
   Description: string
   Risks?: string
@@ -99,6 +100,7 @@ function transformSharePointItem(item: any): Project {
     Status: (item.Status || 'In Progress') as any,
     Leads: item.Leads || '',
     Effort: item.Effort || '',
+    Label: item.Label || '',
     Departments: item.Departments || '',
     Description: item.Description || '',
     'Sum of Label Row Signed': item.SumOfLabelRowSigned || '0'

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import ProjectSection from './ProjectSection'
 import QuarterGrid from './QuarterGrid'
 
-const ProjectTimeline = forwardRef(function ProjectTimeline({ positionedIO, positionedSPG, onProjectClick, ioMeasurements, spgMeasurements, isTransitioning }, ref) {
+const ProjectTimeline = forwardRef(function ProjectTimeline({ positionedIO, positionedSPG, onProjectClick, onProjectPresent, ioMeasurements, spgMeasurements, isTransitioning }, ref) {
   return (
     <div ref={ref} className="relative timeline-container">
       {/* IO Projects Above Timeline */}
@@ -14,6 +14,7 @@ const ProjectTimeline = forwardRef(function ProjectTimeline({ positionedIO, posi
         projects={positionedIO}
         isAbove={true}
         onProjectClick={onProjectClick}
+        onProjectPresent={onProjectPresent}
         measurements={ioMeasurements}
         isTransitioning={isTransitioning}
       />
@@ -66,6 +67,7 @@ const ProjectTimeline = forwardRef(function ProjectTimeline({ positionedIO, posi
         projects={positionedSPG}
         isAbove={false}
         onProjectClick={onProjectClick}
+        onProjectPresent={onProjectPresent}
         measurements={spgMeasurements}
         isTransitioning={isTransitioning}
       />

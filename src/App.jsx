@@ -8,6 +8,8 @@ import BrandHeader from './components/BrandHeader'
 import BrandMark from './components/BrandMark'
 import SectionHeader from './components/SectionHeader'
 import DetailPanel from './components/DetailPanel'
+import PrintSheet from './components/PrintSheet'
+import PresentationMode from './components/PresentationMode'
 import { getProjectId } from './utils/dataParser'
 import { fetchProjectData } from './utils/sharePointDataFetcher'
 import { layout } from './layout/layout'
@@ -36,6 +38,11 @@ function App() {
   const [dataStatus, setDataStatus] = useState('loading') // 'loading' | 'error' | 'loaded'
   const [errorMessage, setErrorMessage] = useState(null)
   const panelRef = useRef(null)
+
+  // Presentation mode: an index into `presentationOrder` rather than a project object, so
+  // the arrow buttons can step through the list without the overlay needing to know how the
+  // board is arranged. null = closed.
+  const [presentIndex, setPresentIndex] = useState(null)
 
   // Quarter View's popup DetailPanel is anchored directly under the brand column on the
   // right (see BrandHeader) rather than a page-edge guess - measuring the real element is
@@ -230,6 +237,29 @@ function App() {
   // timeline-specific. The measurement hooks above still run unconditionally either way
   // (hooks can't be conditional on viewMode), which is a deliberate tradeoff: it means
   // switching to Timeline view is instant even if the user started on Quarter view.
+  // Presentation order is stable and view-independent - IO then SPG, by quarter, by name -
+  // so stepping through with the arrows walks the portfolio in a sensible reading order
+  // rather than whatever order the current view happens to render in.
+  const presentationOrder = useMemo(() => {
+    const teamRank = (t) => (t === 'IO' ? 0 : 1)
+    const qtrRank = (q) => parseInt(String(q).replace('Qtr ', ''), 10) || 0
+    return [...projects].sort((a, b) =>
+      teamRank(a.Team) - teamRank(b.Team) ||
+      qtrRank(a.Quarter) - qtrRank(b.Quarter) ||
+      a.Project.localeCompare(b.Project)
+    )
+  }, [projects])
+
+  const handleProjectPresent = (project) => {
+    const idx = presentationOrder.findIndex((p) => getProjectId(p) === getProjectId(project))
+    if (idx >= 0) {
+      // Double-click fires after the single-click that opened the side panel, so close it -
+      // otherwise it sits behind the overlay and is still there when presentation exits.
+      setSelectedProject(null)
+      setPresentIndex(idx)
+    }
+  }
+
   const stageReady = ioMeasurements.isReady && spgMeasurements.isReady
   const contentReady = viewMode === 'timeline' ? stageReady : dataStatus === 'loaded'
 
@@ -325,6 +355,7 @@ function App() {
                 positionedIO={positionedIO}
                 positionedSPG={positionedSPG}
                 onProjectClick={handleProjectClick}
+                onProjectPresent={handleProjectPresent}
                 ioMeasurements={ioMeasurements.measured}
                 spgMeasurements={spgMeasurements.measured}
                 isTransitioning={isViewTransitioning}
@@ -336,6 +367,7 @@ function App() {
             <QuarterBoxView
               projects={projects}
               onProjectClick={handleProjectClick}
+              onProjectPresent={handleProjectPresent}
               isTransitioning={isViewTransitioning}
             />
           </motion.div>
@@ -471,6 +503,21 @@ function App() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {presentIndex !== null && (
+          <PresentationMode
+            projects={presentationOrder}
+            index={presentIndex}
+            onNavigate={setPresentIndex}
+            onClose={() => setPresentIndex(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Print / "Save as PDF" view. Hidden on screen; Ctrl+P swaps to it. Mounted OUTSIDE
+          the wrapper above so no ancestor transform, scale or filter can reach it. */}
+      <PrintSheet projects={projects} />
 
       {/* Debug Overlay - only in dev with ?debug=1.
           displayPosition is the card's CENTER (ProjectCardSimple centers via a CSS
