@@ -43,6 +43,7 @@ function App() {
   // the arrow buttons can step through the list without the overlay needing to know how the
   // board is arranged. null = closed.
   const [presentIndex, setPresentIndex] = useState(null)
+  const [presentOrigin, setPresentOrigin] = useState(null)
 
   // Quarter View's popup DetailPanel is anchored directly under the brand column on the
   // right (see BrandHeader) rather than a page-edge guess - measuring the real element is
@@ -250,9 +251,10 @@ function App() {
     )
   }, [projects])
 
-  const handleProjectPresent = (project) => {
+  const handleProjectPresent = (project, originRect) => {
     const idx = presentationOrder.findIndex((p) => getProjectId(p) === getProjectId(project))
     if (idx >= 0) {
+      setPresentOrigin(originRect || null)
       // Double-click fires after the single-click that opened the side panel, so close it -
       // otherwise it sits behind the overlay and is still there when presentation exits.
       setSelectedProject(null)
@@ -509,8 +511,9 @@ function App() {
           <PresentationMode
             projects={presentationOrder}
             index={presentIndex}
+            originRect={presentOrigin}
             onNavigate={setPresentIndex}
-            onClose={() => setPresentIndex(null)}
+            onClose={() => { setPresentIndex(null); setPresentOrigin(null) }}
           />
         )}
       </AnimatePresence>

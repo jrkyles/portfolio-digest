@@ -1,5 +1,5 @@
-import { useEffect, useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
+import { motion, useAnimationControls } from 'framer-motion'
 import { Calendar, Users, Building2, FileText, Tag, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { getTeamColor, PRIMARY_COLOR, SECONDARY_COLOR, CARD_TRANSITION } from '../layout/constants'
 import { getProjectId } from '../utils/dataParser'
@@ -18,8 +18,48 @@ import { getProjectId } from '../utils/dataParser'
  * list, wrapping at both ends, so a whole portfolio can be walked through without returning
  * to the board. Left/Right arrow keys do the same; Escape exits.
  */
-export default function PresentationMode({ projects, index, onNavigate, onClose }) {
+export default function PresentationMode({ projects, index, originRect, onNavigate, onClose }) {
   const project = projects[index]
+
+  // Grow out of the card that was double-clicked, rather than fading in over it.
+  //
+  // A manual FLIP rather than Framer's `layoutId`: the timeline cards are plain
+  // CSS-transitioned divs with no Framer identity to pair with (and re-adding layoutId to
+  // them is exactly what previously fought their position animation). Measuring the real
+  // final rect and inverting it against the clicked card's rect works regardless of how
+  // either element is built, and behaves identically from both views.
+  //
+  // Driven through imperative controls, NOT an `initial` prop: Framer reads `initial` once
+  // at mount, and the from-state can't be known until the dialog has been laid out and
+  // measured - by which point `initial` has already been consumed. `controls.set()` inside
+  // useLayoutEffect applies the inverted transform synchronously before the browser paints,
+  // so the first painted frame is already card-sized.
+  const dialogRef = useRef(null)
+  const controls = useAnimationControls()
+
+  useLayoutEffect(() => {
+    const el = dialogRef.current
+    if (!el) return
+    const final = el.getBoundingClientRect()
+
+    if (!originRect || !final.width || !final.height) {
+      controls.set({ opacity: 0, scale: 0.97, y: 12 })
+      controls.start({ opacity: 1, scale: 1, y: 0, transition: CARD_TRANSITION })
+      return
+    }
+
+    controls.set({
+      opacity: 1,
+      x: (originRect.left + originRect.width / 2) - (final.left + final.width / 2),
+      y: (originRect.top + originRect.height / 2) - (final.top + final.height / 2),
+      scaleX: originRect.width / final.width,
+      scaleY: originRect.height / final.height,
+    })
+    controls.start({ x: 0, y: 0, scaleX: 1, scaleY: 1, transition: CARD_TRANSITION })
+    // Open only. Stepping with the arrows cross-fades in place rather than flying back to
+    // wherever the original card happened to be.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const step = useCallback((delta) => {
     if (!projects.length) return
@@ -61,9 +101,8 @@ export default function PresentationMode({ projects, index, onNavigate, onClose 
                  pointerEvents: 'none' }}
       >
         <motion.div
-          key={getProjectId(project)}
-          initial={{ opacity: 0, scale: 0.97, y: 12 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
+          ref={dialogRef}
+          animate={controls}
           exit={{ opacity: 0, scale: 0.98 }}
           transition={CARD_TRANSITION}
           role="dialog"
@@ -74,8 +113,10 @@ export default function PresentationMode({ projects, index, onNavigate, onClose 
             pointerEvents: 'auto',
             width: '100%', maxWidth: 1100, maxHeight: '100%',
             overflowY: 'auto',
-            borderLeft: `6px solid ${teamColor}`,
             boxShadow: '0 40px 100px -20px rgba(10,37,62,.45)',
+            // Scaling about the centre and translating the centre delta keeps the text
+            // upright; scaling from a corner would visibly skew it on the way in.
+            transformOrigin: 'center center',
           }}
         >
           <button
@@ -86,7 +127,13 @@ export default function PresentationMode({ projects, index, onNavigate, onClose 
             <X className="w-6 h-6 text-neutral-500" />
           </button>
 
-          <div style={{ padding: 'clamp(28px, 4vw, 56px)' }}>
+          <motion.div
+            key={getProjectId(project)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.18 }}
+            style={{ padding: 'clamp(28px, 4vw, 56px)' }}
+          >
             <div className="flex items-center flex-wrap gap-3 mb-6">
               <span className="px-4 py-1.5 text-white text-sm font-bold rounded-full"
                     style={{ fontFamily: 'Calibri, Arial, sans-serif', backgroundColor: teamColor }}>
@@ -158,7 +205,7 @@ export default function PresentationMode({ projects, index, onNavigate, onClose 
                 </p>
               </Block>
             )}
-          </div>
+          </motion.div>
 
           {/* Edge arrows. Anchored to the card itself rather than the viewport so they stay
               with it at any size, and vertically centred so they're reachable without
@@ -201,16 +248,18 @@ function Block({ icon, title, color, children }) {
   )
 }
 
+/** Bare chevrons - no plate, border or shadow. They sit inside the card's own padding, so
+ *  the card edge stays a clean rectangle and the controls read as part of it. */
 function NavButton({ side, onClick, label, children }) {
   return (
     <button
       type="button" onClick={onClick} aria-label={label}
-      className="absolute rounded-full bg-white hover:bg-neutral-50 text-neutral-600"
+      className="absolute text-neutral-400 hover:text-neutral-600"
       style={{
-        [side]: -22, top: '50%', transform: 'translateY(-50%)',
-        width: 46, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: '1px solid #DFE3E8', boxShadow: '0 6px 20px -6px rgba(10,37,62,.35)',
-        cursor: 'pointer', zIndex: 3,
+        [side]: 6, top: '50%', transform: 'translateY(-50%)',
+        width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'none', border: 'none', padding: 0,
+        cursor: 'pointer', zIndex: 3, transition: 'color .15s ease',
       }}
     >
       {children}

@@ -114,7 +114,9 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
         }}
         onDoubleClick={(e) => {
           e.stopPropagation()
-          onProjectPresent(project)
+          // Hand over where the card physically is, so presentation mode can expand out of
+          // it rather than fading in over the top.
+          onProjectPresent(project, e.currentTarget.getBoundingClientRect())
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {

@@ -61,7 +61,7 @@ export default function QuarterBoxCard({ project, onProjectClick, onProjectPrese
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()
-        onProjectPresent(project)
+        onProjectPresent(project, e.currentTarget.getBoundingClientRect())
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseMove={handleTilt}
