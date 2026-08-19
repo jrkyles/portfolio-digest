@@ -24,7 +24,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$SiteUrl,
-  [string]$ListName = "Projects",
+  [string]$ListName = "Status Report Tracking Information",
   [string]$SeedFromCsv
 )
 

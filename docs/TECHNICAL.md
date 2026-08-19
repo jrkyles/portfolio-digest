@@ -208,7 +208,7 @@ function resolveListName(fallback: string): string {
 }
 ```
 
-Default `'Projects'`. Lets one build serve multiple sites or a next-year list without a
+Default is `DEFAULT_LIST_NAME` = `'Status Report Tracking Information'`. Lets one build serve multiple sites or a next-year list without a
 rebuild, matching the existing `?debug=1` / `?packing=bin` convention.
 
 ### 3.5 The internal-name trap
@@ -330,7 +330,7 @@ a warning rather than throwing, so one bad row cannot take down the dashboard.
 |---|---|---|---|
 | `Project` | Text | ✅ | Card title; half the identity key |
 | `Team` | Text | ✅ | `IO`/`SPG` — section placement and colour |
-| `Quarter` | Text | ✅ | `Qtr 1`–`Qtr 4`, exact string match |
+| `Quarter` | Text | ✅ | Normalised to `Qtr 1`–`Qtr 4`; **0 / blank / out-of-range rows are dropped** |
 | `Status` | Text | | Badge; `Completed` → silver pill, else navy |
 | `Month` | Text | | Due date, detail panel |
 | `Day` | Text | | Due date, detail panel |
@@ -341,8 +341,12 @@ a warning rather than throwing, so one bad row cannot take down the dashboard.
 | `Description` | Note | | Detail panel body |
 | `Year` | Text | | Carried through; not currently rendered |
 
-**Quarter parsing:** `App.jsx` does `parseInt(p.Quarter.replace('Qtr ', ''))`. The string must
-match exactly — `Q2`, `Qtr2`, or `Quarter 2` all yield `NaN` and the card lands nowhere useful.
+**Quarter parsing:** `normalizeQuarter()` in `dataParser.ts` is the single gate. It pulls the
+first integer out of whatever the column contains — `Qtr 2`, `Q2`, `Quarter 2`, a bare `2` —
+and returns the canonical `Qtr 2`, or `null` if the value isn't 1–4. Both ingest paths run it,
+so everything downstream can keep assuming `parseInt(Quarter.replace('Qtr ', ''))` is safe.
+A `0` (the tracker's "not scheduled yet" marker), a blank, or anything out of range is
+rejected at ingest with a warning rather than defaulting into Q1 or producing `NaN`.
 
 **Known quirk — `Effort`:** this column holds `IO` / `SPG` / `Dual`, not effort levels. The
 detail panel prints it verbatim, so it reads "Effort: Dual". Inherited from the source

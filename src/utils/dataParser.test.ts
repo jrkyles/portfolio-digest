@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCSV, getProjectId } from './dataParser'
+import { normalizeQuarter, parseCSV, getProjectId } from './dataParser'
 
 describe('parseCSV', () => {
   it('parses a simple CSV with no quoting', () => {
@@ -73,5 +73,51 @@ describe('parseCSV', () => {
     const rows = parseCSV(csv)
     expect(rows).toHaveLength(1)
     expect(rows[0].Project).toBe('Valid Task')
+  })
+})
+
+describe('normalizeQuarter', () => {
+  it('accepts the canonical form and the shapes the list actually contains', () => {
+    expect(normalizeQuarter('Qtr 3')).toBe('Qtr 3')
+    expect(normalizeQuarter('  Qtr 3 ')).toBe('Qtr 3')
+    expect(normalizeQuarter('Q3')).toBe('Qtr 3')
+    expect(normalizeQuarter('Quarter 3')).toBe('Qtr 3')
+    expect(normalizeQuarter('3')).toBe('Qtr 3')
+    expect(normalizeQuarter(3)).toBe('Qtr 3')
+  })
+
+  it('rejects 0 and anything else outside 1-4', () => {
+    // 0 is the real case: rows that exist in the tracker but aren't scheduled into a
+    // quarter yet. They must not render rather than defaulting into Q1.
+    expect(normalizeQuarter('0')).toBeNull()
+    expect(normalizeQuarter(0)).toBeNull()
+    expect(normalizeQuarter('Qtr 0')).toBeNull()
+    expect(normalizeQuarter('5')).toBeNull()
+    expect(normalizeQuarter('Qtr 7')).toBeNull()
+    expect(normalizeQuarter('')).toBeNull()
+    expect(normalizeQuarter('   ')).toBeNull()
+    expect(normalizeQuarter('TBD')).toBeNull()
+    expect(normalizeQuarter(null)).toBeNull()
+    expect(normalizeQuarter(undefined)).toBeNull()
+  })
+})
+
+describe('parseCSV quarter filtering', () => {
+  it('drops rows whose Quarter is 0 or out of range, and keeps the valid ones', () => {
+    const csv = [
+      'Project,Team,Quarter,Status',
+      'Scheduled Task,IO,Qtr 2,In Progress',
+      'Unscheduled Task,IO,0,Not Started',
+      'Bad Quarter Task,SPG,9,In Progress',
+      'Bare Number Task,SPG,4,Completed',
+    ].join('\n')
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const rows = parseCSV(csv)
+
+    expect(rows.map((r) => r.Project)).toEqual(['Scheduled Task', 'Bare Number Task'])
+    // A bare number is normalised rather than rejected.
+    expect(rows[1].Quarter).toBe('Qtr 4')
+    warn.mockRestore()
   })
 })

@@ -47,7 +47,7 @@ Install-Module PnP.PowerShell -Scope CurrentUser
 
 ./scripts/Provision-PortfolioList.ps1 `
     -SiteUrl "https://<tenant>.sharepoint.com/sites/<site>" `
-    -ListName "Projects" `
+    -ListName "Status Report Tracking Information" `
     -SeedFromCsv "./public/sample-timeline-data.csv"   # optional
 ```
 
@@ -57,7 +57,7 @@ Install-Module PnP.PowerShell -Scope CurrentUser
 |---------------|-----------------|----------|-------|
 | `Project`     | Single line     | ✅       | Card title. Used with `Quarter` as the row's identity. |
 | `Team`        | Single line     | ✅       | `IO` or `SPG` — drives which side of the timeline the card sits on, and its colour. |
-| `Quarter`     | Single line     | ✅       | `Qtr 1` … `Qtr 4`, exactly. |
+| `Quarter`     | Single line     | ✅       | Must resolve to 1–4. `Qtr 2`, `Q2`, `Quarter 2` and a bare `2` are all accepted. **A row whose Quarter is `0`, blank, or outside 1–4 is not shown** — there is nowhere on the timeline to place it. |
 | `Status`      | Single line     |          | Free text; `Completed` gets the silver pill, anything else navy. |
 | `Month`       | Single line     |          | Full month name, e.g. `April`. |
 | `Day`         | Single line     |          | Day of month. |
@@ -68,8 +68,10 @@ Install-Module PnP.PowerShell -Scope CurrentUser
 | `Description` | Multiple lines  |          | Shown in the detail panel. |
 | `Year`        | Single line     |          | Currently display-only. |
 
-Rows missing `Project`, `Team` or `Quarter` are skipped with a console warning rather than
-breaking the render. Duplicate `Project`+`Quarter` pairs are de-duplicated with a `#2` suffix
+Rows missing `Project` or `Team`, or whose `Quarter` is not 1–4, are skipped with a console
+warning rather than breaking the render. This is the intended way to park a task in the
+tracker before it has been scheduled: set its Quarter to `0` and it stays out of the report
+until a real quarter is assigned. Duplicate `Project`+`Quarter` pairs are de-duplicated with a `#2` suffix
 and a warning — they are not silently dropped.
 
 `Title` is left required-by-SharePoint but unused; the script marks it optional so nobody has
@@ -110,11 +112,11 @@ Then either link users straight to `index.html`, or embed it on a page with the
 
 ## 4. Point it at a different list
 
-`?list=` overrides the default list name without a rebuild — the same bundle can serve
+`?list=` overrides the default list name (`Status Report Tracking Information`) without a rebuild — the same bundle can serve
 several sites:
 
 ```
-.../portfolio-digest/index.html?list=Projects2027
+.../portfolio-digest/index.html?list=Some%20Other%20List
 ```
 
 Other runtime switches: `?debug=1` (layout-violation overlay, dev builds only) and

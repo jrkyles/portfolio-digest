@@ -16,6 +16,29 @@ export function getMonthNumber(month: string): number {
   return MONTH_MAP[month] ?? (parseInt(month) || 1)
 }
 
+
+/**
+ * Normalise a Quarter value to the canonical `Qtr 1`-`Qtr 4`, or null if it isn't one.
+ *
+ * The list column is free text, so in practice it arrives in several shapes: `Qtr 2`, a bare
+ * `2`, `Q2`, `Quarter 2`, stray whitespace, or - the case that motivated this - `0` on rows
+ * that exist in the tracker but haven't been scheduled into a quarter yet. Everything
+ * downstream (lane packing, quarter grouping, `parseInt(Quarter.replace('Qtr ', ''))`)
+ * assumes a real 1-4, and a 0 or a blank silently produced NaN and a card positioned
+ * nowhere sensible. Rejecting here means such a row is dropped cleanly at ingest with a
+ * warning, rather than rendering somewhere wrong.
+ */
+export function normalizeQuarter(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  const raw = String(value).trim()
+  if (!raw) return null
+  const match = raw.match(/(\d+)/)          // pulls the digits out of any of the shapes above
+  if (!match) return null
+  const n = parseInt(match[1], 10)
+  if (!Number.isFinite(n) || n < 1 || n > 4) return null
+  return `Qtr ${n}`
+}
+
 /** Stable id for a project row - Project+Quarter should be unique; collisions are detected
  * and disambiguated in parseCSV rather than silently overwriting one another downstream. */
 export function getProjectId(project: { Project: string; Quarter: string }): string {
@@ -114,7 +137,15 @@ export function parseCSV(csvText: string): Project[] {
       project[header] = (values[index] ?? '').trim()
     })
 
-    if (project.Project && project.Team && project.Quarter) {
+    const normalizedQuarter = normalizeQuarter(project.Quarter)
+    if (project.Quarter && !normalizedQuarter) {
+      console.warn(
+        `Skipping "${project.Project || '(unnamed)'}": Quarter "${project.Quarter}" is not 1-4.`
+      )
+    }
+    if (normalizedQuarter) project.Quarter = normalizedQuarter
+
+    if (project.Project && project.Team && normalizedQuarter) {
       const baseId = getProjectId(project)
       const seenCount = seenIds.get(baseId) || 0
       seenIds.set(baseId, seenCount + 1)
@@ -127,7 +158,7 @@ export function parseCSV(csvText: string): Project[] {
       }
       projects.push(project as Project)
     } else {
-      console.warn('Skipping invalid project (missing Project/Team/Quarter):', project)
+      console.warn('Skipping invalid project (missing Project/Team, or Quarter not 1-4):', project)
     }
   }
 

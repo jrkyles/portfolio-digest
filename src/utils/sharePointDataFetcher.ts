@@ -1,5 +1,5 @@
 import type { Project } from '@/types'
-import { getProjectId, parseCSV } from './dataParser'
+import { getProjectId, normalizeQuarter, parseCSV } from './dataParser'
 
 /**
  * SharePoint REST API data fetcher.
@@ -11,6 +11,12 @@ import { getProjectId, parseCSV } from './dataParser'
  * document library, an SPFx web part, etc.) - it is not true if this app is ever hosted
  * somewhere else and just linked to from SharePoint.
  */
+
+/**
+ * The live SharePoint list this dashboard reads. Overridable per-deployment with `?list=`
+ * (see resolveListName) - spaces are fine, getbytitle() takes the display title verbatim.
+ */
+export const DEFAULT_LIST_NAME = 'Status Report Tracking Information'
 
 /** Fallback dataset shipped in public/ - fabricated sample rows, never real portfolio data. */
 export const SAMPLE_CSV_FILENAME = 'sample-timeline-data.csv'
@@ -37,10 +43,10 @@ interface SharePointListItem {
 /**
  * Fetch projects from SharePoint list using REST API
  * 
- * @param listName - Name of the SharePoint list (e.g., "Projects")
+ * @param listName - Display title of the SharePoint list
  * @returns Array of Project objects
  */
-export async function fetchSharePointListData(listName: string = 'Projects'): Promise<Project[]> {
+export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NAME): Promise<Project[]> {
   try {
     console.log(`[SharePoint] Fetching data from list: ${listName}`)
 
@@ -92,7 +98,9 @@ export async function fetchSharePointListData(listName: string = 'Projects'): Pr
 function transformSharePointItem(item: any): Project {
   return {
     Year: item.Year || '',
-    Quarter: (item.Quarter || 'Qtr 1') as any,
+    // Normalised to canonical 'Qtr 1'-'Qtr 4'; anything else becomes '' and is rejected
+    // by isValidProject below rather than defaulting into Q1.
+    Quarter: (normalizeQuarter(item.Quarter) || '') as any,
     Month: item.Month || '',
     Day: item.Day || '',
     Team: (item.Team || 'IO') as any,
@@ -132,16 +140,22 @@ function disambiguateDuplicateIds(projects: Project[]): Project[] {
  * Validate that project has required fields
  */
 function isValidProject(project: Project): boolean {
+  // Quarter has already been normalised in transformSharePointItem, so a non-empty value
+  // here is guaranteed to be one of 'Qtr 1'-'Qtr 4'. Rows whose Quarter was 0, blank, or
+  // otherwise outside 1-4 arrive as '' and are dropped: they exist in the tracker but
+  // aren't scheduled into a quarter, and there is nowhere on the timeline to put them.
   const isValid = !!(
     project.Project &&
     project.Team &&
     project.Quarter
   )
-  
+
   if (!isValid) {
-    console.warn('[SharePoint] Skipping invalid project:', project)
+    console.warn(
+      `[SharePoint] Skipping "${project.Project || '(unnamed)'}" - needs Project, Team, and a Quarter of 1-4.`
+    )
   }
-  
+
   return isValid
 }
 
@@ -173,7 +187,7 @@ function resolveListName(fallback: string): string {
  * Fetch data with automatic fallback
  * Tries SharePoint API first, falls back to CSV if not in SharePoint
  */
-export async function fetchProjectData(listName: string = 'Projects'): Promise<Project[]> {
+export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Promise<Project[]> {
   const resolvedListName = resolveListName(listName)
 
   // If in SharePoint context, use API
