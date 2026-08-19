@@ -13,9 +13,18 @@ export type Quarter = 'Qtr 1' | 'Qtr 2' | 'Qtr 3' | 'Qtr 4'
 export type Team = 'IO' | 'SPG'
 
 /**
- * Raw project data from CSV. No `Risks` field - it doesn't exist anywhere in the source
- * CSV schema or SharePoint mapping; don't add it back here without also adding it to the
- * CSV header, sharePointDataFetcher.ts's transformSharePointItem, and DetailPanel.jsx together.
+ * Raw project data from CSV.
+ *
+ * Field names here are also the CSV header names and the SharePoint *internal* column names -
+ * parseCSV maps headers to keys verbatim, and transformSharePointItem reads `item.<Name>`.
+ * Adding a field means touching all three together (CSV header, transformSharePointItem,
+ * and the provisioning script's schema), or it silently arrives as undefined.
+ *
+ * `BusinessPOC` / `RisksIssues` are spelled without spaces on purpose: SharePoint escapes a
+ * space in an internal name as `_x0020_` permanently at creation time, so a column created
+ * as "Business POC" is forever `Business_x0020_POC` in the REST payload. Creating them with
+ * space-free internal names avoids that trap entirely; transformSharePointItem still accepts
+ * the escaped forms in case the columns already exist on a list built by hand.
  */
 export interface Project {
   Year: string
@@ -30,6 +39,10 @@ export interface Project {
   Label: string
   Departments: string
   Description: string
+  /** Named business owner for the task - the person to ask about it, not who builds it. */
+  BusinessPOC: string
+  /** Free text: known risks, blockers and open issues. Blank for most rows. */
+  RisksIssues: string
   'Sum of Label Row Signed': string
 }
 

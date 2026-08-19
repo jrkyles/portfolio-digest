@@ -27,7 +27,8 @@ describe('QuarterBoxView', () => {
     const onProjectClick = vi.fn()
     render(<QuarterBoxView projects={projects} onProjectClick={onProjectClick} />)
     await userEvent.click(screen.getByRole('button', { name: /Vendor Evaluation Scorecard/ }))
-    expect(onProjectClick).toHaveBeenCalledTimes(1)
+    // Deferred by one double-click window - see useSingleOrDoubleClick.
+    await waitFor(() => expect(onProjectClick).toHaveBeenCalledTimes(1))
     expect(onProjectClick.mock.calls[0][0].Project).toBe('Vendor Evaluation Scorecard')
   })
 
@@ -72,7 +73,7 @@ describe('QuarterBoxView', () => {
       render(<QuarterBoxView projects={projects} onProjectClick={onProjectClick} />)
       await userEvent.click(screen.getByRole('button', { name: /Document Intake Automation/ }))
 
-      expect(onProjectClick).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(onProjectClick).toHaveBeenCalledTimes(1))
       expect(screen.queryByRole('button', { name: 'Close expanded quarter' })).not.toBeInTheDocument()
     })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ProjectCardSimple from './ProjectCardSimple'
 
@@ -47,7 +47,9 @@ describe('ProjectCardSimple', () => {
   it('calls onProjectClick with the project on click', async () => {
     const { onProjectClick } = renderCard()
     await userEvent.click(screen.getByRole('button'))
-    expect(onProjectClick).toHaveBeenCalledWith(project)
+    // Single-click is deliberately deferred by one double-click window so a second click can
+    // claim it for presentation mode instead - see useSingleOrDoubleClick.
+    await waitFor(() => expect(onProjectClick).toHaveBeenCalledWith(project))
   })
 
   it('calls onHoverChange(true) on mouse enter and onHoverChange(false) on mouse leave', async () => {

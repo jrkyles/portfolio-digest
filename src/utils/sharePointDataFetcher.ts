@@ -21,6 +21,16 @@ export const DEFAULT_LIST_NAME = 'Status Report Tracking Information'
 /** Fallback dataset shipped in public/ - fabricated sample rows, never real portfolio data. */
 export const SAMPLE_CSV_FILENAME = 'sample-timeline-data.csv'
 
+/**
+ * Id of an optional <script type="text/csv"> block carrying the sample rows inline.
+ *
+ * This is the contract with scripts/bundle-singlefile.mjs, which produces a one-file build
+ * for SharePoint handover: in that build there is no sibling .csv to fetch, so the rows are
+ * embedded in the page instead. Checked before the network path so the single-file build
+ * makes no request at all for its fallback data.
+ */
+export const EMBEDDED_SAMPLE_ID = 'embedded-sample-data'
+
 interface SharePointListItem {
   Id: number
   Title: string
@@ -36,7 +46,8 @@ interface SharePointListItem {
   Label: string
   Departments: string
   Description: string
-  Risks?: string
+  BusinessPOC?: string
+  RisksIssues?: string
   SumOfLabelRowSigned?: string
 }
 
@@ -111,6 +122,12 @@ function transformSharePointItem(item: any): Project {
     Label: item.Label || '',
     Departments: item.Departments || '',
     Description: item.Description || '',
+    // The `_x0020_` variants are the escaped internal names SharePoint generates when a
+    // column is created through the UI with a space in its title. Accepted as fallbacks so
+    // the app still works against a list that was built by hand rather than by the
+    // provisioning script - otherwise these arrive as undefined with no visible error.
+    BusinessPOC: item.BusinessPOC || item.Business_x0020_POC || '',
+    RisksIssues: item.RisksIssues || item.Risks_x0020_and_x0020_Issues || item.Risks || '',
     'Sum of Label Row Signed': item.SumOfLabelRowSigned || '0'
   }
 }
@@ -211,6 +228,14 @@ export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Pr
   // app is demoable offline and the bundle carries no real portfolio content. In a
   // SharePoint deployment the List above is the real source; this is only reached locally,
   // or if the List call fails.
+  const embedded = typeof document !== 'undefined'
+    ? document.getElementById(EMBEDDED_SAMPLE_ID)?.textContent
+    : null
+  if (embedded && embedded.trim()) {
+    console.log('[Data] Using sample rows embedded in the page (single-file build)')
+    return parseCSV(embedded)
+  }
+
   const response = await fetch(`${import.meta.env.BASE_URL}${SAMPLE_CSV_FILENAME}`)
   if (!response.ok) {
     throw new Error(`Could not load the task data (HTTP ${response.status}).`)

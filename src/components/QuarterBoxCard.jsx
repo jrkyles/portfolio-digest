@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CARD_TRANSITION, getTeamColor, TILT_MAX_DEG } from '../layout/constants'
+import { useSingleOrDoubleClick } from '../hooks/useSingleOrDoubleClick'
 import { getProjectId } from '../utils/dataParser'
 
 /**
@@ -48,21 +49,23 @@ export default function QuarterBoxCard({ project, onProjectClick, onProjectPrese
 
   const handleActivate = () => onProjectClick(project)
 
+  // Read from a ref rather than the click event: the handler below defers the single-click
+  // action, and a synthetic event's currentTarget is already null when that timer fires.
+  const cardRef = useRef(null)
+  const handleCardClick = useSingleOrDoubleClick(
+    handleActivate,
+    () => onProjectPresent(project, cardRef.current?.getBoundingClientRect()),
+  )
+
   return (
     <motion.div
+      ref={cardRef}
       layout
       layoutId={isTransitioning ? projectId : undefined}
       transition={CARD_TRANSITION}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      onClick={(e) => {
-        e.stopPropagation()
-        handleActivate()
-      }}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        onProjectPresent(project, e.currentTarget.getBoundingClientRect())
-      }}
+      onClick={handleCardClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseMove={handleTilt}
       onMouseLeave={() => { setIsHovered(false); setTilt({ rx: 0, ry: 0 }) }}

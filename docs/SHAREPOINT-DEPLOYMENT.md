@@ -65,7 +65,9 @@ Install-Module PnP.PowerShell -Scope CurrentUser
 | `Effort`      | Single line     |          | See the note in §5. |
 | `Label`       | Single line     |          | Classification tag (e.g. Quick Win, Compliance). Shown as a pill beside Team/Status. |
 | `Departments` | Single line     |          | Comma-separated — split into chips. |
-| `Description` | Multiple lines  |          | Shown in the detail panel. |
+| `Description` | Multiple lines  |          | Shown in the detail panel and the PDF. |
+| `BusinessPOC` | Single line     |          | Business owner — the person to ask about the task, not who builds it. PDF only. Space-free internal name on purpose (see below). |
+| `RisksIssues` | Multiple lines  |          | Known risks, blockers and open issues. PDF only; blank for most rows. |
 | `Year`        | Single line     |          | Currently display-only. |
 
 Rows missing `Project` or `Team`, or whose `Quarter` is not 1–4, are skipped with a console
@@ -74,39 +76,63 @@ tracker before it has been scheduled: set its Quarter to `0` and it stays out of
 until a real quarter is assigned. Duplicate `Project`+`Quarter` pairs are de-duplicated with a `#2` suffix
 and a warning — they are not silently dropped.
 
+`BusinessPOC` and `RisksIssues` have space-free internal names for the same reason the whole
+schema does: SharePoint encodes a space as `_x0020_` permanently at creation time, so a column
+created through the UI as "Business POC" is `Business_x0020_POC` in every REST response
+thereafter. The provisioning script sets the internal names explicitly and gives them normal
+display names. If these columns already exist on a hand-built list, the app also accepts the
+escaped forms (`Business_x0020_POC`, `Risks_x0020_and_x0020_Issues`) and a plain `Risks`, so
+an existing list keeps working without being rebuilt.
+
 `Title` is left required-by-SharePoint but unused; the script marks it optional so nobody has
 to type the project name twice.
 
 ---
 
-## 3. Build and upload
+## 3. Upload
+
+**Nothing needs to be built.** `deploy/InnovationPortfolioDigest.html` is a single
+self-contained file — the JavaScript, the stylesheet, the Federal Reserve seal and the
+offline sample data are all inlined into it. It makes **zero external requests**: no CDN, no
+`assets/` folder, no sibling files. The only network call it ever makes is the one to the
+SharePoint list it is sitting on.
+
+That is deliberate. The normal Vite output is an `index.html` plus an `assets/` directory
+plus the contents of `public/`, and deploying that means preserving a folder structure inside
+a document library and trusting every relative URL still resolves — which is the usual way
+this kind of app ends up as a blank page with 404s in the console days after handover.
+
+To regenerate it after a code change:
 
 ```bash
 npm ci
-npm run build      # → dist/
+npm run build:single      # → deploy/InnovationPortfolioDigest.html
 ```
 
-`vite.config.js` sets `base: './'`, so the bundle references its own assets **relatively**.
-This is what lets it live at `/sites/<site>/SiteAssets/<folder>/` instead of the domain root.
-Without it every asset 404s and you get a blank page.
+The build fails loudly if anything did not get inlined, rather than emitting a file that
+works locally and 404s in SharePoint.
 
-Upload the **contents** of `dist/` (not the folder itself) to a document library — e.g.
-`Site Assets/portfolio-digest/`:
+### Where to put it
 
-```
-Site Assets/portfolio-digest/
-├── index.html
-├── assets/
-├── fed-seal.png
-└── sample-timeline-data.csv
-```
+Upload the file to a document library — `Site Assets` is the conventional home. It must live
+on **the same SharePoint site as the list**: the app calls `/_api/web/lists/...` relatively,
+which is what makes it pick up the viewer's existing SharePoint sign-in with no auth wiring,
+no app registration, and no secrets. Hosted anywhere else, that call is cross-origin and
+fails.
 
-Then either link users straight to `index.html`, or embed it on a page with the
-**Embed** web part pointing at that URL.
+Then make it reachable. **This is the one decision that depends on the tenant**, because
+SharePoint Online does not render arbitrary `.html` from a document library by default:
 
-> Some tenants block inline scripts in embedded HTML. If the embed renders blank, link to
-> `index.html` directly, or host it in a library where **Custom Script** is permitted
-> (`Set-PnPTenantSite -Url <site> -NoScriptSite $false`).
+| Situation | What to do |
+|---|---|
+| Custom script is **allowed** on the site | Link users straight at the uploaded file's URL. This is the least-effort path and needs nothing else. |
+| Custom script is **blocked** (the SPO default) | Either enable it for this one site — `Set-PnPTenantSite -Url <site> -NoScriptSite $false` — or add an **Embed** web part on a modern page pointing at the file's URL. |
+
+To check which applies before uploading anything: upload the file, open its URL, and see
+whether it renders or downloads. If it downloads, you are in row two.
+
+> If an Embed web part renders blank, that is the tenant blocking inline scripts — the
+> `NoScriptSite` route above is the fix, and it is a per-site setting, not a tenant-wide one.
 
 ---
 

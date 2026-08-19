@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import QuarterBoxCard from './QuarterBoxCard'
+import { DOUBLE_CLICK_MS } from '../hooks/useSingleOrDoubleClick'
 
 const project = {
   Project: 'Document Intake Automation',
@@ -53,11 +54,33 @@ describe('QuarterBoxCard', () => {
     const card = screen.getByRole('button')
 
     await userEvent.click(card)
-    expect(onProjectClick).toHaveBeenCalledWith(project)
+    // Click is deferred by one double-click window so a second click can claim it for
+    // presentation mode instead - see useSingleOrDoubleClick. Enter/Space stay immediate:
+    // there is no keyboard equivalent of a double-click to disambiguate against.
+    await waitFor(() => expect(onProjectClick).toHaveBeenCalledWith(project))
 
     card.focus()
     await userEvent.keyboard('{Enter}')
     expect(onProjectClick).toHaveBeenCalledTimes(2)
+  })
+
+  it('double-click opens presentation mode and suppresses the single-click action', async () => {
+    const onProjectClick = vi.fn()
+    const onProjectPresent = vi.fn()
+    render(
+      <QuarterBoxCard project={project} onProjectClick={onProjectClick} onProjectPresent={onProjectPresent} />
+    )
+    await userEvent.dblClick(screen.getByRole('button'))
+
+    expect(onProjectPresent).toHaveBeenCalledTimes(1)
+    expect(onProjectPresent.mock.calls[0][0]).toEqual(project)
+
+    // The detail panel must NOT also open. Waiting out the full double-click window proves
+    // the deferred single click was cancelled rather than merely still pending - this is the
+    // regression that made double-clicking feel unreliable, because opening the panel
+    // reflowed the card out from under the second click.
+    await new Promise((r) => setTimeout(r, DOUBLE_CLICK_MS + 60))
+    expect(onProjectClick).not.toHaveBeenCalled()
   })
 
   it('carries a data-project-card id for the outside-click-to-close detection in App.jsx', () => {

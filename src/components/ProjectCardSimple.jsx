@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { useSingleOrDoubleClick } from '../hooks/useSingleOrDoubleClick'
 import { CARD_MIN_WIDTH, TILT_MAX_DEG } from '../layout/constants'
 
 /**
@@ -63,6 +64,17 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
     : 'none'
 
   const handleActivate = () => onProjectClick(project)
+
+  // The FLIP origin must be the VISIBLE card, not the pointer target: while hovered the hit
+  // target is the union of the card's resting and expanded rects (so the pointer can't fall
+  // through the gap mid-expansion), which is larger than anything actually drawn. Measuring
+  // the event target instead would make presentation mode expand out of a box the user never
+  // saw.
+  const visualRef = useRef(null)
+  const handleCardClick = useSingleOrDoubleClick(
+    handleActivate,
+    () => onProjectPresent(project, visualRef.current?.getBoundingClientRect()),
+  )
   const hit = hitRect || rect
 
   // Magnetic tilt. Tracked on the stationary hit target, never the moving visual - reading
@@ -108,16 +120,7 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
         onMouseLeave={() => { onHoverChange(false); resetTilt() }}
         onFocus={() => onHoverChange(true)}
         onBlur={() => onHoverChange(false)}
-        onClick={(e) => {
-          e.stopPropagation()
-          handleActivate()
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation()
-          // Hand over where the card physically is, so presentation mode can expand out of
-          // it rather than fading in over the top.
-          onProjectPresent(project, e.currentTarget.getBoundingClientRect())
-        }}
+        onClick={handleCardClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
@@ -126,6 +129,7 @@ const ProjectCardSimple = memo(function ProjectCardSimple({
         }}
       />
       <div
+        ref={visualRef}
         className="absolute rounded shadow-sm bg-white"
         aria-hidden="true"
         style={{

@@ -9,6 +9,8 @@ import BrandMark from './components/BrandMark'
 import SectionHeader from './components/SectionHeader'
 import DetailPanel from './components/DetailPanel'
 import PrintSheet from './components/PrintSheet'
+import PrintPreview from './components/PrintPreview'
+import PrintButton from './components/PrintButton'
 import PresentationMode from './components/PresentationMode'
 import { getProjectId } from './utils/dataParser'
 import { fetchProjectData } from './utils/sharePointDataFetcher'
@@ -37,6 +39,7 @@ function App() {
   const [viewMode, setViewMode] = useState('timeline') // 'timeline' | 'quarters'
   const [dataStatus, setDataStatus] = useState('loading') // 'loading' | 'error' | 'loaded'
   const [errorMessage, setErrorMessage] = useState(null)
+  const [showPrintPreview, setShowPrintPreview] = useState(false)
   const panelRef = useRef(null)
 
   // Presentation mode: an index into `presentationOrder` rather than a project object, so
@@ -380,6 +383,14 @@ function App() {
   return (
     <>
     <AmbientBackground />
+    {/* Utility action, parked in the page corner rather than in either view's header row -
+        it applies to the whole report, not to whichever view happens to be showing, and
+        both header rows already carry their own primary control. Fixed so it stays reachable
+        while scrolling; z-index sits below the detail panel and presentation mode so those
+        still cover it. */}
+    <div className="no-print" style={{ position: 'fixed', top: 14, right: 18, zIndex: 45 }}>
+      <PrintButton onClick={() => setShowPrintPreview(true)} />
+    </div>
     {/* No bg-white here on purpose - AmbientBackground sits just behind this (z-index -1)
         over the page's own white base (index.css), and an opaque background here would
         hide it completely. */}
@@ -521,6 +532,14 @@ function App() {
       {/* Print / "Save as PDF" view. Hidden on screen; Ctrl+P swaps to it. Mounted OUTSIDE
           the wrapper above so no ancestor transform, scale or filter can reach it. */}
       <PrintSheet projects={projects} />
+
+      {/* Deliberately NOT wrapped in AnimatePresence. As a custom component it would be an
+          indirect AnimatePresence child, and an exit animation that fails to complete leaves
+          the overlay mounted forever - i.e. a preview that cannot be closed. A fade-out worth
+          0.18s is not worth that failure mode; it animates in and is removed outright. */}
+      {showPrintPreview && (
+        <PrintPreview projects={projects} onClose={() => setShowPrintPreview(false)} />
+      )}
 
       {/* Debug Overlay - only in dev with ?debug=1.
           displayPosition is the card's CENTER (ProjectCardSimple centers via a CSS

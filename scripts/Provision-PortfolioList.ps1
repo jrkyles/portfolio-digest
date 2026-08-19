@@ -58,7 +58,13 @@ $columns = @(
   @{ Internal = "Effort";      Display = "Effort";                  Type = "Text" },
   @{ Internal = "Label";       Display = "Label";                   Type = "Text" },
   @{ Internal = "Departments"; Display = "Departments";             Type = "Text" },
-  @{ Internal = "Description"; Display = "Description";             Type = "Note" }
+  @{ Internal = "Description"; Display = "Description";             Type = "Note" },
+  # Internal names are deliberately space-free. SharePoint permanently encodes a space in an
+  # internal name as _x0020_ at creation time, so a column created through the UI as
+  # "Business POC" is forever Business_x0020_POC in the REST payload. Creating them here with
+  # -InternalName avoids that entirely; the display names still read normally in the list UI.
+  @{ Internal = "BusinessPOC"; Display = "Business POC";            Type = "Text" },
+  @{ Internal = "RisksIssues"; Display = "Risks and Issues";        Type = "Note" }
 )
 
 foreach ($c in $columns) {
@@ -99,6 +105,8 @@ if ($SeedFromCsv) {
       Label       = $r.Label
       Departments = $r.Departments
       Description = $r.Description
+      BusinessPOC = $r.BusinessPOC
+      RisksIssues = $r.RisksIssues
     } | Out-Null
   }
   Write-Host ("Seeded {0} items." -f $rows.Count) -ForegroundColor Green

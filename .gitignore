@@ -1,8 +1,14 @@
 # Dependencies
 node_modules/
 
-# Build output — regenerate with `npm run build`
-dist/
+# dist/ is committed on purpose, not ignored. This repo doubles as the handover package:
+# whoever deploys it should not need Node, npm, or a build step, so the built output ships
+# with the source. Regenerate with `npm run build:single`, which refreshes both dist/ and the
+# single file below.
+
+# deploy/ is likewise NOT ignored: deploy/InnovationPortfolioDigest.html is the
+# handover artefact, and committing it is what lets whoever deploys it skip Node, npm and
+# the build entirely. Regenerate with `npm run build:single`.
 
 # Editor / OS
 .DS_Store

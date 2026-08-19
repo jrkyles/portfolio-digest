@@ -70,7 +70,8 @@ describe('ProjectSection', () => {
       <ProjectSection label="IO" color="#A86E77" projects={buildProjects()} isAbove onProjectClick={onProjectClick} measurements={measurements} />
     )
     await userEvent.click(screen.getByRole('button', { name: /Vendor Evaluation Scorecard/ }))
-    expect(onProjectClick).toHaveBeenCalledTimes(1)
+    // Deferred by one double-click window - see useSingleOrDoubleClick.
+    await waitFor(() => expect(onProjectClick).toHaveBeenCalledTimes(1))
     expect(onProjectClick.mock.calls[0][0].Project).toBe('Vendor Evaluation Scorecard')
   })
 

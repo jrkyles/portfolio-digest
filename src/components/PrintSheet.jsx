@@ -10,9 +10,11 @@ import { getProjectId } from '../utils/dataParser'
  * internally so anything past the fold simply wouldn't exist on paper. A table has none of
  * those problems: it paginates natively, wraps text, and reads the same on screen or in ink.
  *
- * Layout mirrors the team's existing Excel sheet (Status | Effort | Task | Leads | Department
- * | Description) so the printout is familiar, but recolored onto the site's own palette
- * rather than Excel's stock green/blue fills.
+ * Column order leads with Project, because the task name is what a reader scans for first
+ * and every other cell is an attribute OF it - the colour-coded Status/Effort cells sit
+ * immediately after, so the page can still be read by colour alone the way the source Excel
+ * sheet is. Colours are recoloured onto the site's own palette rather than Excel's stock
+ * green/blue fills.
  *
  * Hidden on screen and revealed only in print, via `.print-only` in index.css. It lives
  * outside the blurred/scaled app wrapper so no ancestor transform or filter can affect it.
@@ -56,14 +58,19 @@ function sortForPrint(projects) {
   )
 }
 
-export default function PrintSheet({ projects }) {
+/**
+ * `preview` renders the same sheet for on-screen display inside PrintPreview: it drops
+ * `print-only` (which is display:none on screen) and the aria-hidden, since in that context
+ * the sheet IS the content being looked at rather than a hidden print-time artefact.
+ */
+export default function PrintSheet({ projects, preview = false }) {
   const rows = sortForPrint(projects)
   const printedOn = new Date().toLocaleDateString(undefined, {
     year: 'numeric', month: 'long', day: 'numeric',
   })
 
   return (
-    <div className="print-only print-sheet" aria-hidden="true">
+    <div className={preview ? 'print-sheet' : 'print-only print-sheet'} aria-hidden={preview ? undefined : 'true'}>
       <header className="print-head">
         <div>
           <p className="print-eyebrow">Innovation | Special Projects Group</p>
@@ -77,12 +84,14 @@ export default function PrintSheet({ projects }) {
       <table className="print-table">
         <thead>
           <tr>
+            <th className="c-task">Project</th>
             <th className="c-status">Status</th>
             <th className="c-effort">Effort</th>
             <th className="c-label">Label</th>
-            <th className="c-task">Task Name</th>
             <th className="c-leads">Leads</th>
+            <th className="c-poc">Business POC</th>
             <th className="c-dept">Department</th>
+            <th className="c-risk">Risks &amp; Issues</th>
             <th className="c-desc">Description</th>
           </tr>
         </thead>
@@ -92,6 +101,7 @@ export default function PrintSheet({ projects }) {
             const effort = p.Effort || ''
             return (
               <tr key={getProjectId(p)}>
+                <td className="c-task">{p.Project}</td>
                 <td
                   className="fill"
                   style={{
@@ -113,7 +123,6 @@ export default function PrintSheet({ projects }) {
                   {effort}
                 </td>
                 <td className="c-label">{p.Label}</td>
-                <td className="c-task">{p.Project}</td>
                 {/* Leads are newline-separated in the source; each gets its own line here,
                     matching the stacked cells in the reference sheet. */}
                 <td className="c-leads">
@@ -123,7 +132,11 @@ export default function PrintSheet({ projects }) {
                     .filter(Boolean)
                     .map((l, i) => <span key={i}>{l}</span>)}
                 </td>
+                {/* Business POC is a single named owner, not a list - deliberately not
+                    split the way Leads is. */}
+                <td className="c-poc">{p.BusinessPOC}</td>
                 <td className="c-dept">{p.Departments}</td>
+                <td className="c-risk">{p.RisksIssues}</td>
                 <td className="c-desc">{p.Description}</td>
               </tr>
             )
