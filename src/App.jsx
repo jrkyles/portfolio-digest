@@ -190,7 +190,12 @@ function App() {
       // fails) - see sharePointDataFetcher.ts.
       const parsedData = await fetchProjectData()
       if (parsedData.length === 0) {
-        throw new Error('No valid task rows were found (check Project/Team/Quarter columns).')
+        // Not "check the Project/Team/Quarter columns" - those are this app's own internal
+        // field names, not literal SharePoint column requirements (see
+        // sharePointDataFetcher.ts's transformSharePointItem). Pointing at the browser
+        // console instead is more honest: it logs the list's actual column names and, per
+        // row, exactly which requirement (a title, or a valid Quarter) was missing.
+        throw new Error('No valid task rows were found. Open the browser console for the exact reason per row.')
       }
       setProjects(parsedData)
       setDataStatus('loaded')

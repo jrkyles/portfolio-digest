@@ -80,10 +80,32 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
 
     console.log(`[SharePoint] Fetched ${items.length} items from list across ${pageCount} page(s)`)
 
+    // Logged unconditionally (not just when something goes wrong) - this is THE thing to look
+    // at in the browser console when rows aren't showing up. It is the ground truth for what
+    // the list's columns are actually called over REST, which is not always what the list UI
+    // displays (a column titled "Task Name" might be internally "Title", "TaskName", or
+    // "Task_x0020_Name" depending on how it was created) - matching field names purely from a
+    // screenshot of the entry form, as this app's mapping originally was, is exactly what
+    // produced the last version of this bug. If rows are still being skipped after checking
+    // this, the name actually being used needs adding to the relevant pickField(...) call in
+    // transformSharePointItem below, not guessed at again.
+    if (items.length > 0) {
+      console.log('[SharePoint] Column names on the first item (this is what REST actually returns):', Object.keys(items[0]))
+    }
+
     // Transform SharePoint items to Project interface
     const projects: Project[] = items
       .map(item => transformSharePointItem(item))
       .filter(project => isValidProject(project))
+
+    if (items.length > 0 && projects.length === 0) {
+      console.warn(
+        '[SharePoint] Every item was fetched but ZERO passed validation - almost always a ' +
+        'column-name mismatch (see the "Column names on the first item" log above) rather ' +
+        'than genuinely empty data. Check it against the candidate names in ' +
+        'transformSharePointItem below.'
+      )
+    }
 
     return disambiguateDuplicateIds(projects)
 
@@ -207,22 +229,32 @@ function disambiguateDuplicateIds(projects: Project[]): Project[] {
 }
 
 /**
- * Validate that project has required fields
+ * Validate that project has required fields.
+ *
+ * Only a title and a resolvable Quarter are actually required - Team always defaults to 'IO'
+ * in transformSharePointItem, so it can never be the reason a row is rejected here, and every
+ * other field renders blank rather than gating the row at all ("loosen the logic so it pulls
+ * whatever it can get" - see docs/SHAREPOINT-DEPLOYMENT.md §2).
  */
 function isValidProject(project: Project): boolean {
   // Quarter has already been normalised in transformSharePointItem, so a non-empty value
   // here is guaranteed to be one of 'Qtr 1'-'Qtr 4'. Rows whose Quarter was 0, blank, or
   // otherwise outside 1-4 arrive as '' and are dropped: they exist in the tracker but
   // aren't scheduled into a quarter, and there is nowhere on the timeline to put them.
-  const isValid = !!(
-    project.Project &&
-    project.Team &&
-    project.Quarter
-  )
+  const hasTitle = !!project.Project
+  const hasQuarter = !!project.Quarter
+  const isValid = hasTitle && hasQuarter
 
   if (!isValid) {
+    // Names exactly which requirement failed, not a blanket "needs Project/Team/Quarter" -
+    // Project/Team aren't literal SharePoint column names this app requires anymore (see
+    // transformSharePointItem's pickField candidates), so a message implying they are is
+    // itself misleading when read on a real deployment.
+    const reasons = []
+    if (!hasTitle) reasons.push('no card title found (checked Project/Task Name/TaskName/Title)')
+    if (!hasQuarter) reasons.push('Quarter is blank, 0, or not 1-4')
     console.warn(
-      `[SharePoint] Skipping "${project.Project || '(unnamed)'}" - needs Project, Team, and a Quarter of 1-4.`
+      `[SharePoint] Skipping "${project.Project || '(unnamed)'}" - ${reasons.join('; ')}.`
     )
   }
 
