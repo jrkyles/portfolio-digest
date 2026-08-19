@@ -49,7 +49,18 @@ type SharePointListItem = Record<string, any>
  */
 export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NAME): Promise<Project[]> {
   try {
-    console.log(`[SharePoint] Fetching data from list: ${listName}`)
+    // Everything below is deliberately verbose and unconditional (not gated on an error
+    // occurring) - the previous version only logged once something had already gone wrong,
+    // which meant diagnosing "it loads but nothing shows up" required re-triggering the
+    // failure with extra logging added first. This is meant to answer, from a single normal
+    // page load's console output, every question in "why isn't my data here":
+    //   1. Was the right list actually requested, and did the request succeed at all?
+    //   2. If it failed, what did SharePoint's own error response actually say (not just the
+    //      HTTP status code, which alone is rarely enough to diagnose anything)?
+    //   3. If it succeeded, what did SharePoint actually return - real column names AND
+    //      real values, not a guess from a screenshot of the entry form?
+    //   4. Of what came back, how much survived validation, and for whatever didn't, why not?
+    console.log(`%c[SharePoint] Requesting list "${listName}"`, 'font-weight:bold')
 
     // $top=5000 is a per-page cap, not a total cap - SharePoint still paginates within it,
     // and a list can exceed 5000 items outright. `d.__next` (odata=verbose) is a complete
@@ -60,6 +71,7 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
     let pageCount = 0
 
     while (nextUrl) {
+      console.log(`[SharePoint] GET ${nextUrl}`)
       const response = await fetch(nextUrl, {
         method: 'GET',
         headers: {
@@ -67,43 +79,90 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
           'Content-Type': 'application/json;odata=verbose'
         }
       })
+      console.log(`[SharePoint] Response: ${response.status} ${response.statusText} (page ${pageCount + 1})`)
 
       if (!response.ok) {
-        throw new Error(`SharePoint API error: ${response.status} ${response.statusText}`)
+        // SharePoint's error responses carry a JSON body with the ACTUAL reason - e.g.
+        // "List 'Status Report Tracking Information' does not exist at site with URL
+        // '...'" for a wrong list name, or an access-denied message for a permissions
+        // problem - which is categorically more useful than the bare status code and was
+        // previously discarded entirely. `.text()` first (not `.json()` directly) because a
+        // non-SharePoint error page (e.g. a login redirect HTML page) wouldn't parse as JSON
+        // and would throw here instead of surfacing the real problem.
+        const bodyText = await response.text().catch(() => '')
+        let detail = bodyText
+        try {
+          const parsed = JSON.parse(bodyText)
+          detail = parsed?.error?.message?.value || bodyText
+        } catch {
+          // Not JSON - most often means this URL isn't hitting the SharePoint REST API at
+          // all (wrong site, or a sign-in redirect page came back instead). Logging the raw
+          // body (below) is what makes that visible.
+        }
+        console.error('[SharePoint] Error response body:', bodyText)
+        throw new Error(`SharePoint API error: ${response.status} ${response.statusText} - ${detail}`)
       }
 
       const data = await response.json()
-      items.push(...(data.d.results as SharePointListItem[]))
+      const pageItems = (data.d.results as SharePointListItem[]) || []
+      items.push(...pageItems)
       pageCount += 1
       nextUrl = data.d.__next || null
     }
 
-    console.log(`[SharePoint] Fetched ${items.length} items from list across ${pageCount} page(s)`)
+    console.log(`[SharePoint] Fetched ${items.length} item(s) across ${pageCount} page(s)`)
 
-    // Logged unconditionally (not just when something goes wrong) - this is THE thing to look
-    // at in the browser console when rows aren't showing up. It is the ground truth for what
-    // the list's columns are actually called over REST, which is not always what the list UI
-    // displays (a column titled "Task Name" might be internally "Title", "TaskName", or
-    // "Task_x0020_Name" depending on how it was created) - matching field names purely from a
-    // screenshot of the entry form, as this app's mapping originally was, is exactly what
-    // produced the last version of this bug. If rows are still being skipped after checking
-    // this, the name actually being used needs adding to the relevant pickField(...) call in
-    // transformSharePointItem below, not guessed at again.
-    if (items.length > 0) {
-      console.log('[SharePoint] Column names on the first item (this is what REST actually returns):', Object.keys(items[0]))
+    if (items.length === 0) {
+      console.warn(
+        `[SharePoint] The list "${listName}" returned ZERO items. Either the list is ` +
+        'genuinely empty, or this list name does not match what you expect - open ' +
+        `/_api/web/lists/getbytitle('${listName}')/items in a browser tab on this same site ` +
+        'to see the raw response and confirm.'
+      )
+    } else {
+      // THE single most useful log line in this whole file for diagnosing "columns don't
+      // match": the literal property names REST actually returns, which is not always what
+      // the list's entry form displays (a column titled "Task Name" might come back as
+      // `Title`, `TaskName`, or `Task_x0020_Name` depending on how it was created) -
+      // matching field names purely from a screenshot of the form, as this app's mapping
+      // originally did, is exactly what produced the last version of this bug.
+      console.log('[SharePoint] Column names on the first item (ground truth - REST, not the entry form):', Object.keys(items[0]))
+      // The full item, not just its keys - console.log on an object is natively inspectable
+      // in the browser devtools (expandable tree), so this also shows every actual VALUE,
+      // which matters for catching a column that returns a nested object (e.g. a Person or
+      // Lookup field) rather than a plain string.
+      console.log('[SharePoint] First raw item in full:', items[0])
     }
 
-    // Transform SharePoint items to Project interface
+    // Transform SharePoint items to Project interface, tallying WHY each rejected row failed
+    // rather than just how many did - "0 of 24 passed" alone doesn't say whether it's a
+    // missing title, a bad Quarter, or both. logSkippedRow also logs a specific per-row
+    // warning for each rejection, naming that row's title (or lack of one).
+    let missingTitle = 0
+    let badQuarter = 0
     const projects: Project[] = items
       .map(item => transformSharePointItem(item))
-      .filter(project => isValidProject(project))
+      .filter((project) => {
+        const { valid, hasTitle, hasQuarter } = validateProject(project)
+        if (!hasTitle) missingTitle++
+        if (!hasQuarter) badQuarter++
+        if (!valid) logSkippedRow(project, hasTitle, hasQuarter)
+        return valid
+      })
 
+    console.log(
+      `%c[SharePoint] ${projects.length} of ${items.length} row(s) will render` +
+      (items.length - projects.length > 0
+        ? ` (${items.length - projects.length} skipped: ${missingTitle} missing a title, ${badQuarter} with an invalid Quarter)`
+        : ''),
+      `font-weight:bold;color:${projects.length > 0 ? '#2e7d32' : '#c62828'}`
+    )
     if (items.length > 0 && projects.length === 0) {
       console.warn(
         '[SharePoint] Every item was fetched but ZERO passed validation - almost always a ' +
-        'column-name mismatch (see the "Column names on the first item" log above) rather ' +
-        'than genuinely empty data. Check it against the candidate names in ' +
-        'transformSharePointItem below.'
+        'column-name mismatch (compare "Column names on the first item" above against the ' +
+        'candidate names each field checks in transformSharePointItem, in this file) rather ' +
+        'than genuinely empty data.'
       )
     }
 
@@ -189,7 +248,7 @@ function transformSharePointItem(item: SharePointListItem): Project {
   return {
     Year: pickField(lookup, 'Year'),
     // Normalised to canonical 'Qtr 1'-'Qtr 4'; anything else becomes '' and is rejected
-    // by isValidProject below rather than defaulting into Q1.
+    // by validateProject below rather than defaulting into Q1.
     Quarter: (normalizeQuarter(pickField(lookup, 'Quarter')) || '') as any,
     Month: pickField(lookup, 'Month'),
     Day: pickField(lookup, 'Day'),
@@ -229,48 +288,64 @@ function disambiguateDuplicateIds(projects: Project[]): Project[] {
 }
 
 /**
- * Validate that project has required fields.
+ * Validate that project has required fields, and report exactly which requirement (if any)
+ * failed - used both for the per-row console warning and the aggregate skip-reason tally in
+ * fetchSharePointListData, so the two never drift out of sync with each other.
  *
  * Only a title and a resolvable Quarter are actually required - Team always defaults to 'IO'
  * in transformSharePointItem, so it can never be the reason a row is rejected here, and every
  * other field renders blank rather than gating the row at all ("loosen the logic so it pulls
  * whatever it can get" - see docs/SHAREPOINT-DEPLOYMENT.md §2).
  */
-function isValidProject(project: Project): boolean {
+function validateProject(project: Project): { valid: boolean; hasTitle: boolean; hasQuarter: boolean } {
   // Quarter has already been normalised in transformSharePointItem, so a non-empty value
   // here is guaranteed to be one of 'Qtr 1'-'Qtr 4'. Rows whose Quarter was 0, blank, or
   // otherwise outside 1-4 arrive as '' and are dropped: they exist in the tracker but
   // aren't scheduled into a quarter, and there is nowhere on the timeline to put them.
   const hasTitle = !!project.Project
   const hasQuarter = !!project.Quarter
-  const isValid = hasTitle && hasQuarter
+  return { valid: hasTitle && hasQuarter, hasTitle, hasQuarter }
+}
 
-  if (!isValid) {
-    // Names exactly which requirement failed, not a blanket "needs Project/Team/Quarter" -
-    // Project/Team aren't literal SharePoint column names this app requires anymore (see
-    // transformSharePointItem's pickField candidates), so a message implying they are is
-    // itself misleading when read on a real deployment.
-    const reasons = []
-    if (!hasTitle) reasons.push('no card title found (checked Project/Task Name/TaskName/Title)')
-    if (!hasQuarter) reasons.push('Quarter is blank, 0, or not 1-4')
-    console.warn(
-      `[SharePoint] Skipping "${project.Project || '(unnamed)'}" - ${reasons.join('; ')}.`
-    )
+/** Logs exactly which requirement a rejected row failed, not a blanket "needs
+ * Project/Team/Quarter" - Project/Team aren't literal SharePoint column names this app
+ * requires anymore (see transformSharePointItem's pickField candidates), so a message
+ * implying they are is itself misleading when read on a real deployment. */
+function logSkippedRow(project: Project, hasTitle: boolean, hasQuarter: boolean): void {
+  const reasons = []
+  if (!hasTitle) reasons.push('no card title found (checked Project/Task Name/TaskName/Title)')
+  if (!hasQuarter) reasons.push('Quarter is blank, 0, or not 1-4')
+  console.warn(
+    `[SharePoint] Skipping "${project.Project || '(unnamed)'}" - ${reasons.join('; ')}.`
+  )
+}
+
+/**
+ * The individual signals isSharePointContext() checks, exposed separately so the diagnostic
+ * log in fetchProjectData can show WHICH ones fired rather than just the final boolean - this
+ * matters because a false negative here is a real, easy-to-hit failure mode: a raw `.html`
+ * file opened directly from a document library (rather than through a modern page's Embed web
+ * part) is served without SharePoint's own page-rendering pipeline, so `_spPageContextInfo`
+ * is never injected. On a standard `*.sharepoint.com` tenant the hostname check still catches
+ * it regardless; on a custom/vanity domain, neither check may fire, and the app silently falls
+ * back to sample data - it will LOOK like it's working (cards render) while showing fabricated
+ * rows instead of the real list. The banner in fetchProjectData is what makes that visible.
+ */
+function getSharePointContextSignals(): { hostname: string; hostnameMatches: boolean; hasPageContextInfo: boolean; detected: boolean } {
+  if (typeof window === 'undefined') {
+    return { hostname: '(no window)', hostnameMatches: false, hasPageContextInfo: false, detected: false }
   }
-
-  return isValid
+  const hostname = window.location.hostname
+  const hostnameMatches = hostname.includes('sharepoint.com') || hostname.includes('sharepoint.us')
+  const hasPageContextInfo = typeof (window as any)._spPageContextInfo !== 'undefined'
+  return { hostname, hostnameMatches, hasPageContextInfo, detected: hostnameMatches || hasPageContextInfo }
 }
 
 /**
  * Check if running in SharePoint context
  */
 export function isSharePointContext(): boolean {
-  // Check if we're in SharePoint by looking for common SharePoint objects
-  return typeof window !== 'undefined' && (
-    window.location.hostname.includes('sharepoint.com') ||
-    window.location.hostname.includes('sharepoint.us') ||
-    typeof (window as any)._spPageContextInfo !== 'undefined'
-  )
+  return getSharePointContextSignals().detected
 }
 
 /**
@@ -291,36 +366,59 @@ function resolveListName(fallback: string): string {
  */
 export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Promise<Project[]> {
   const resolvedListName = resolveListName(listName)
+  const listSource = resolvedListName !== listName ? 'from ?list= in the URL' : 'the default'
+  const signals = getSharePointContextSignals()
 
-  // If in SharePoint context, use API
-  if (isSharePointContext()) {
+  // Logged unconditionally, first thing - this is the fork every other diagnostic in this
+  // file hangs off of. If `detected` is false on what you know is a real SharePoint page,
+  // that itself is the entire answer to "why isn't my data showing up": nothing past this
+  // point ever talks to SharePoint at all, and everything you see instead is sample data.
+  console.log(
+    `%c[Data] Context check - hostname: "${signals.hostname}", ` +
+    `matches sharepoint.com/.us: ${signals.hostnameMatches}, ` +
+    `_spPageContextInfo present: ${signals.hasPageContextInfo} ` +
+    `=> SharePoint context: ${signals.detected}`,
+    'font-weight:bold'
+  )
+  console.log(`[Data] List name: "${resolvedListName}" (${listSource})`)
+
+  if (signals.detected) {
     console.log('[Data] SharePoint context detected, using REST API')
     try {
       return await fetchSharePointListData(resolvedListName)
     } catch (error) {
-      console.warn('[Data] SharePoint API failed, falling back to CSV:', error)
-      // Fall through to CSV fallback
+      console.warn('[Data] SharePoint API call failed - falling back to sample data. Real error:', error)
+      // Fall through to sample-data fallback
     }
+  } else {
+    console.warn(
+      '[Data] NOT detected as a SharePoint context - skipping the list entirely and going ' +
+      'straight to sample data. If this page IS on SharePoint, see the comment on ' +
+      'getSharePointContextSignals() above for the most likely reason (a raw .html file ' +
+      'opened directly, on a custom/vanity domain, has neither signal available).'
+    )
   }
-  
-  // Fallback: Load from CSV (for local development, and as a safety net if the List call fails)
-  console.log('[Data] Loading from CSV file')
+
+  // Fallback: sample data (local dev, a genuinely non-SharePoint context, or the List call
+  // above failed). Loud on purpose - every row rendered from here is FABRICATED, not your
+  // real list, and that needs to be unmistakable in the console rather than something you
+  // only realize by recognizing the sample project names.
+  console.warn(
+    '%c[Data] USING SAMPLE DATA, NOT YOUR SHAREPOINT LIST - every task shown from here is fabricated.',
+    'font-weight:bold;color:#c62828'
+  )
   // BASE_URL-relative, not a leading-slash absolute path: under SharePoint this app is
   // served from a nested path (/sites/<site>/SiteAssets/<app>/), where a '/'-rooted path
   // would resolve against the domain root and 404. See vite.config.js's `base`.
-  //
-  // This file is SAMPLE data - fabricated rows with the same shape as the real list, so the
-  // app is demoable offline and the bundle carries no real portfolio content. In a
-  // SharePoint deployment the List above is the real source; this is only reached locally,
-  // or if the List call fails.
   const embedded = typeof document !== 'undefined'
     ? document.getElementById(EMBEDDED_SAMPLE_ID)?.textContent
     : null
   if (embedded && embedded.trim()) {
-    console.log('[Data] Using sample rows embedded in the page (single-file build)')
+    console.log('[Data] Source: sample rows embedded in the page itself (this is the single-file build)')
     return parseCSV(embedded)
   }
 
+  console.log(`[Data] Source: fetching ${import.meta.env.BASE_URL}${SAMPLE_CSV_FILENAME}`)
   const response = await fetch(`${import.meta.env.BASE_URL}${SAMPLE_CSV_FILENAME}`)
   if (!response.ok) {
     throw new Error(`Could not load the task data (HTTP ${response.status}).`)

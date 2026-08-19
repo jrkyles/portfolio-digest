@@ -41,7 +41,7 @@ describe('fetchProjectData', () => {
     ;(window as any)._spPageContextInfo = {}
     global.fetch = vi.fn().mockImplementation((url) => {
       if (typeof url === 'string' && url.includes('/_api/web/lists')) {
-        return Promise.resolve({ ok: false, status: 500, statusText: 'Server Error' })
+        return Promise.resolve({ ok: false, status: 500, statusText: 'Server Error', text: () => Promise.resolve('') })
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
     })
@@ -148,8 +148,19 @@ describe('fetchSharePointListData', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Duplicate Project+Quarter'))
   })
 
-  it('throws when the List API responds with an error status', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' })
+  it('throws when the List API responds with an error status, including SharePoint\'s own error detail from the body', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 403, statusText: 'Forbidden',
+      text: () => Promise.resolve('{"error":{"message":{"value":"Access denied."}}}'),
+    })
+    await expect(fetchSharePointListData('Projects')).rejects.toThrow(/SharePoint API error.*Access denied/)
+  })
+
+  it('still throws a clear error when the error response body is not JSON (e.g. a sign-in redirect page)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 403, statusText: 'Forbidden',
+      text: () => Promise.resolve('<html>Sign in</html>'),
+    })
     await expect(fetchSharePointListData('Projects')).rejects.toThrow(/SharePoint API error/)
   })
 
