@@ -1,0 +1,30 @@
+HOW THE PORTFOLIO DIGEST GETS ITS INFORMATION
+Innovation | Special Projects Group
+
+
+The report does not store any data of its own. Every card on it is a row in a
+SharePoint list, read fresh each time someone opens the page.
+
+
+HOW IT WORKS
+
+1. The team keeps the SharePoint list up to date. It is an ordinary list -
+   one row per task, edited the same way as any other list.
+
+2. Someone opens the report. At that moment the page asks SharePoint for the
+   list as it stands right then. It never uses a saved copy.
+
+3. Each row is drawn as a card. Its columns set the task name, the team, the
+   quarter it falls in, its status, and the detail shown when you click it.
+
+
+WHAT THIS MEANS
+
+Updates need no republishing. Edit the list, refresh the page, and the change
+is there.
+
+Access follows the list. The page reads it as whoever is signed in - there is
+no separate account or password. Anyone who can open the list sees the report.
+
+The list is the single source of truth. The report cannot be edited directly,
+so the two can never disagree.
