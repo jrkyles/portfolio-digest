@@ -71,6 +71,60 @@ describe('fetchSharePointListData', () => {
     ])
   })
 
+  it('reads the live list\'s real column names ("Task Name", "Department", "Labels", "Risks / Issues", "Business POC") instead of requiring this app\'s own field names verbatim', async () => {
+    mockListResponse([
+      {
+        'Task Name': 'Vendor Evaluation Scorecard',
+        Team: 'SPG',
+        Quarter: 'Qtr 3',
+        Status: 'In Progress',
+        Department: 'Legal, Research',
+        Labels: 'Strategic',
+        'Risks / Issues': 'Vendor renewal not yet confirmed.',
+        'Business POC': 'Jordan Patel',
+      },
+    ])
+    const projects = await fetchSharePointListData('Status Report Tracking Information')
+    expect(projects).toEqual([
+      expect.objectContaining({
+        Project: 'Vendor Evaluation Scorecard',
+        Departments: 'Legal, Research',
+        Label: 'Strategic',
+        RisksIssues: 'Vendor renewal not yet confirmed.',
+        BusinessPOC: 'Jordan Patel',
+      }),
+    ])
+  })
+
+  it('reads SharePoint-escaped internal names (spaces/slashes as `_xHHHH_`) the same as their human-readable form', async () => {
+    mockListResponse([
+      {
+        Task_x0020_Name: 'Escaped Column Names',
+        Team: 'IO',
+        Quarter: 'Qtr 1',
+        Business_x0020_POC: 'Avery Chen',
+        Risks_x0020_Issues: 'Escaped risks field.',
+      },
+    ])
+    const projects = await fetchSharePointListData('Status Report Tracking Information')
+    expect(projects).toEqual([
+      expect.objectContaining({
+        Project: 'Escaped Column Names',
+        BusinessPOC: 'Avery Chen',
+        RisksIssues: 'Escaped risks field.',
+      }),
+    ])
+  })
+
+  it('does not require Month/Day/Year - a list that has none of the three still produces a valid row', async () => {
+    mockListResponse([
+      { 'Task Name': 'No Date Fields On This List', Team: 'IO', Quarter: 'Qtr 4' },
+    ])
+    const projects = await fetchSharePointListData('Status Report Tracking Information')
+    expect(projects).toHaveLength(1)
+    expect(projects[0]).toEqual(expect.objectContaining({ Month: '', Day: '', Year: '' }))
+  })
+
   it('skips items missing Project/Team/Quarter', async () => {
     mockListResponse([
       { Project: '', Team: 'IO', Quarter: 'Qtr 2' },

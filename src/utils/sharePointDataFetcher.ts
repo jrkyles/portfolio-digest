@@ -31,25 +31,15 @@ export const SAMPLE_CSV_FILENAME = 'sample-timeline-data.csv'
  */
 export const EMBEDDED_SAMPLE_ID = 'embedded-sample-data'
 
-interface SharePointListItem {
-  Id: number
-  Title: string
-  Year: string
-  Quarter: string
-  Month: string
-  Day: string
-  Team: string
-  Project: string
-  Status: string
-  Leads: string
-  Effort: string
-  Label: string
-  Departments: string
-  Description: string
-  BusinessPOC?: string
-  RisksIssues?: string
-  SumOfLabelRowSigned?: string
-}
+// A SharePoint list item is whatever columns the list actually has - the shape is not fixed
+// by this app, it is fixed by whoever set up the list (by hand, in the browser, independent
+// of scripts/Provision-PortfolioList.ps1). Typing this as a literal interface would just be
+// wrong the moment the real list's column names drift from it, which is exactly what
+// happened: the live list was built with "Task Name" instead of "Project", "Department"
+// instead of "Departments", "Labels" instead of "Label" - none of which match this app's
+// internal field names verbatim. See buildFieldLookup/pickField below for how matching is
+// actually done - not by direct property access.
+type SharePointListItem = Record<string, any>
 
 /**
  * Fetch projects from SharePoint list using REST API
@@ -104,31 +94,94 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
 }
 
 /**
- * Transform SharePoint list item to Project interface
+ * Reverses SharePoint's internal-name escaping: any character SharePoint won't allow
+ * literally in an internal name is encoded as `_xHHHH_` (the character's hex Unicode code
+ * point) at column-creation time and stays that way forever, regardless of later display-name
+ * renames. A column created through the UI as "Business POC" is `Business_x0020_POC`
+ * (`0x0020` = space) in every REST response for the life of the list; "Risks / Issues" comes
+ * back with both the space AND the slash escaped. This undoes exactly that encoding, so a
+ * literal internal name and its human-readable display name normalise to the same thing.
  */
-function transformSharePointItem(item: any): Project {
+function unescapeSharePointName(name: string): string {
+  return name.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+}
+
+/** Lowercase, alphanumeric-only key - collapses case, whitespace, and punctuation differences
+ * ("Risks / Issues" / "risks-issues" / "RisksIssues" all normalise identically) on top of the
+ * SharePoint-escaping fix above. */
+function normalizeFieldKey(name: string): string {
+  return unescapeSharePointName(name).toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Builds a normalized-key lookup from a raw list item, once per row, so every field read
+ * below is resilient to internal-name escaping and to reasonable real-world naming drift
+ * without an ever-growing list of literal `||` fallbacks. This is what actually fixes "the
+ * list wasn't populating": the app previously read `item.Project` and `item.Departments`
+ * directly, but the live list's real columns are named "Task Name" and "Department" - neither
+ * matches, so every row's `Project` came back empty and every row failed validation.
+ * Normalization alone doesn't bridge a genuine name difference like "Project" vs "Task Name"
+ * (those are different words, not just different formatting), which is why pickField below
+ * still takes an explicit list of plausible names per field - but it means each of THOSE names
+ * only has to be listed once, in whatever casing/spacing is natural, rather than needing every
+ * escaped/cased/spaced variant spelled out by hand.
+ */
+function buildFieldLookup(item: SharePointListItem): Map<string, any> {
+  const lookup = new Map<string, any>()
+  for (const [key, value] of Object.entries(item)) {
+    lookup.set(normalizeFieldKey(key), value)
+  }
+  return lookup
+}
+
+/** First non-blank value among the given candidate column names (checked in order), or ''.
+ * Blank/whitespace-only values are treated the same as absent, so a genuinely empty cell
+ * doesn't shadow a differently-named column later in the candidate list that actually has
+ * data - this is the "loosen the logic so it pulls whatever it can get" half of the fix. */
+function pickField(lookup: Map<string, any>, ...candidateNames: string[]): string {
+  for (const name of candidateNames) {
+    const value = lookup.get(normalizeFieldKey(name))
+    if (value !== undefined && value !== null && String(value).trim()) {
+      return String(value).trim()
+    }
+  }
+  return ''
+}
+
+/**
+ * Transform a raw SharePoint list item into this app's Project shape.
+ *
+ * Candidate names per field are the union of this app's own schema (Provision-PortfolioList.ps1,
+ * for a list the script created) and the live list's actual columns as of this fix (a list
+ * someone set up by hand): "Task Name" for the card title, "Department" (singular) for
+ * Departments, "Labels" (plural) for Label, "Risks / Issues" for RisksIssues. Month/Day/Year
+ * are read too, in case a future list schema restores them, but the live list has none of the
+ * three - they simply come back '' via pickField, which every consumer already renders fine
+ * (DetailPanel/PresentationMode fall back to an em dash rather than a bare space; see there).
+ * The list also has Priority/Impact/Start date/Completed Date columns that this app does not
+ * currently surface anywhere - not read here, since there is nowhere for them to go yet, but
+ * they would slot into this same pickField pattern if that changes.
+ */
+function transformSharePointItem(item: SharePointListItem): Project {
+  const lookup = buildFieldLookup(item)
   return {
-    Year: item.Year || '',
+    Year: pickField(lookup, 'Year'),
     // Normalised to canonical 'Qtr 1'-'Qtr 4'; anything else becomes '' and is rejected
     // by isValidProject below rather than defaulting into Q1.
-    Quarter: (normalizeQuarter(item.Quarter) || '') as any,
-    Month: item.Month || '',
-    Day: item.Day || '',
-    Team: (item.Team || 'IO') as any,
-    Project: item.Project || item.Title || '',
-    Status: (item.Status || 'In Progress') as any,
-    Leads: item.Leads || '',
-    Effort: item.Effort || '',
-    Label: item.Label || '',
-    Departments: item.Departments || '',
-    Description: item.Description || '',
-    // The `_x0020_` variants are the escaped internal names SharePoint generates when a
-    // column is created through the UI with a space in its title. Accepted as fallbacks so
-    // the app still works against a list that was built by hand rather than by the
-    // provisioning script - otherwise these arrive as undefined with no visible error.
-    BusinessPOC: item.BusinessPOC || item.Business_x0020_POC || '',
-    RisksIssues: item.RisksIssues || item.Risks_x0020_and_x0020_Issues || item.Risks || '',
-    'Sum of Label Row Signed': item.SumOfLabelRowSigned || '0'
+    Quarter: (normalizeQuarter(pickField(lookup, 'Quarter')) || '') as any,
+    Month: pickField(lookup, 'Month'),
+    Day: pickField(lookup, 'Day'),
+    Team: (pickField(lookup, 'Team') || 'IO') as any,
+    Project: pickField(lookup, 'Project', 'Task Name', 'TaskName', 'Title'),
+    Status: (pickField(lookup, 'Status') || 'In Progress') as any,
+    Leads: pickField(lookup, 'Leads'),
+    Effort: pickField(lookup, 'Effort'),
+    Label: pickField(lookup, 'Label', 'Labels'),
+    Departments: pickField(lookup, 'Departments', 'Department'),
+    Description: pickField(lookup, 'Description'),
+    BusinessPOC: pickField(lookup, 'BusinessPOC', 'Business POC'),
+    RisksIssues: pickField(lookup, 'RisksIssues', 'Risks / Issues', 'Risks and Issues', 'Risks'),
+    'Sum of Label Row Signed': pickField(lookup, 'Sum of Label Row Signed', 'SumOfLabelRowSigned') || '0'
   }
 }
 

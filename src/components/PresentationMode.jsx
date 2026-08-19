@@ -315,8 +315,10 @@ export default function PresentationMode({ projects, index, originRect, onNaviga
                   </motion.h2>
 
                   <motion.div variants={revealed} className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+                    {/* Neither field is on the live SharePoint list - see DetailPanel.jsx for
+                        why this falls back to an em dash instead of joining two blanks. */}
                     <Stat icon={<Calendar className="w-4 h-4" />} label="Due Date"
-                          value={`${project.Month} ${project.Day}`} sub={project.Quarter} />
+                          value={[project.Month, project.Day].filter(Boolean).join(' ') || '—'} sub={project.Quarter} />
                     <Stat label="Effort" value={project.Effort || 'N/A'} />
                     <Stat icon={<Tag className="w-4 h-4" />} label="Label" value={project.Label || 'N/A'} />
                     <Stat label="Year" value={project.Year || '—'} />

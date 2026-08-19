@@ -159,7 +159,11 @@ const DetailPanel = forwardRef(function DetailPanel({ project, onClose, onMouseE
               <span className="text-xs uppercase tracking-wide font-semibold">Due Date</span>
             </div>
             <p className={isPopup ? 'text-sm font-bold' : 'text-lg font-bold'} style={{ fontFamily: 'Calibri, Arial, sans-serif' }}>
-              {project.Month} {project.Day}
+              {/* Neither field is on the live SharePoint list (only Quarter is) - `Month`/`Day`
+                  come back '' from every real row, and joining two blanks with a bare space
+                  reads as a rendering bug rather than "not tracked". An em dash is honest
+                  about the absence instead. */}
+              {[project.Month, project.Day].filter(Boolean).join(' ') || '—'}
             </p>
             <p className="text-sm text-neutral-500 mt-0.5">{project.Quarter}</p>
           </div>

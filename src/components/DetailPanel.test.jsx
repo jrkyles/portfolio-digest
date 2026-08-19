@@ -27,6 +27,14 @@ describe('DetailPanel', () => {
     expect(screen.getByText(/Assessing vendor risk/)).toBeInTheDocument()
   })
 
+  it('shows an em dash for the due date rather than a bare space when Month/Day are both blank', () => {
+    // The live SharePoint list has no Month/Day columns at all - both come back '' from every
+    // real row (see sharePointDataFetcher.ts's transformSharePointItem).
+    render(<DetailPanel project={{ ...baseProject, Month: '', Day: '' }} onClose={() => {}} />)
+    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.queryByText('March 15')).not.toBeInTheDocument()
+  })
+
   it('calls onClose when the close button is clicked', async () => {
     const onClose = vi.fn()
     render(<DetailPanel project={baseProject} onClose={onClose} />)

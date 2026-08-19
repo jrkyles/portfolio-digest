@@ -32,15 +32,34 @@ than showing an empty page. Watch the browser console for `[Data] SharePoint API
 
 ---
 
-## 2. Create the list
+## 2. Create the list — or point the app at one you already built
 
-Column **internal** names are what matter. REST returns internal names, and the app reads
-`item.Project`, `item.Quarter`, etc. directly. SharePoint freezes a column's internal name at
-creation time — a column first created as `Due Month` is permanently `Due_x0020_Month`, even
-if you rename it to `Month` afterwards. Creating these by hand in the UI is the single most
-likely way to end up with an app that loads but renders nothing.
+**The app now matches columns by name, tolerantly — it does not require an exact internal
+name.** For each field it needs, it checks a short list of plausible column names (case,
+spacing, and punctuation don't matter, and SharePoint's `_x0020_`-style escaping is undone
+automatically before comparing), and takes the first one that actually has data. This is what
+lets it work against a list somebody already built by hand in the browser, with whatever
+column names felt natural at the time, rather than only ever a list this script provisioned.
 
-Use the script:
+Concretely, each app field accepts any of these column names (unescaped, case/spacing-insensitive):
+
+| App field | Accepted SharePoint column names |
+|---|---|
+| Card title (`Project`) | `Project`, `Task Name`, `TaskName`, `Title` |
+| `Departments` | `Departments`, `Department` |
+| `Label` | `Label`, `Labels` |
+| `RisksIssues` | `RisksIssues`, `Risks / Issues`, `Risks and Issues`, `Risks` |
+| `BusinessPOC` | `BusinessPOC`, `Business POC` |
+| Everything else (`Team`, `Quarter`, `Status`, `Effort`, `Leads`, `Description`, `Year`, `Month`, `Day`, `Sum of Label Row Signed`) | matched by name alone — case/spacing-insensitive, but no synonym list, since these haven't been observed under a different name |
+
+If a real list ever uses some *other* reasonable name for one of these fields and rows still
+don't populate, that name just isn't in the list above yet — add it to the `pickField(...)`
+call for that field in `transformSharePointItem()` (`src/utils/sharePointDataFetcher.ts`)
+rather than renaming the SharePoint column, and it will be picked up immediately.
+
+**If you're creating a list from scratch**, use the script — it creates every column with a
+clean, space-free internal name up front, so a *new* list never even needs the tolerant
+matching above:
 
 ```powershell
 Install-Module PnP.PowerShell -Scope CurrentUser
@@ -51,41 +70,43 @@ Install-Module PnP.PowerShell -Scope CurrentUser
     -SeedFromCsv "./public/sample-timeline-data.csv"   # optional
 ```
 
+Do **not** run it against a list that already has data in it under different column names —
+it will create a second, differently-named set of columns alongside the existing ones rather
+than renaming anything.
+
 ### Schema
 
-| Internal name | Type            | Required | Notes |
-|---------------|-----------------|----------|-------|
-| `Project`     | Single line     | ✅       | Card title. Used with `Quarter` as the row's identity. |
-| `Team`        | Single line     | ✅       | `IO` or `SPG` — drives which side of the timeline the card sits on, and its colour. |
-| `Quarter`     | Single line     | ✅       | Must resolve to 1–4. `Qtr 2`, `Q2`, `Quarter 2` and a bare `2` are all accepted. **A row whose Quarter is `0`, blank, or outside 1–4 is not shown** — there is nowhere on the timeline to place it. |
-| `Status`      | Single line     |          | Free text; `Completed` gets the silver pill, anything else navy. |
-| `Month`       | Single line     |          | Full month name, e.g. `April`. |
-| `Day`         | Single line     |          | Day of month. |
-| `Leads`       | Multiple lines  |          | One name per line — the app splits on newlines into chips. |
-| `Effort`      | Single line     |          | See the note in §5. |
-| `Label`       | Single line     |          | Classification tag (e.g. Quick Win, Compliance). Shown as a pill beside Team/Status. |
-| `Departments` | Single line     |          | Comma-separated — split into chips. |
-| `Description` | Multiple lines  |          | Shown in the detail panel and the PDF. |
-| `BusinessPOC` | Single line     |          | Business owner — the person to ask about the task, not who builds it. PDF only. Space-free internal name on purpose (see below). |
-| `RisksIssues` | Multiple lines  |          | Known risks, blockers and open issues. PDF only; blank for most rows. |
-| `Year`        | Single line     |          | Currently display-only. |
+The columns below are what the currently-live list actually has. There is no Month/Day/Year
+column on it — the app doesn't require them; the detail panel and presentation mode show an
+em dash for the due date when both are blank rather than a stray space.
 
-Rows missing `Project` or `Team`, or whose `Quarter` is not 1–4, are skipped with a console
-warning rather than breaking the render. This is the intended way to park a task in the
-tracker before it has been scheduled: set its Quarter to `0` and it stays out of the report
-until a real quarter is assigned. Duplicate `Project`+`Quarter` pairs are de-duplicated with a `#2` suffix
-and a warning — they are not silently dropped.
+| Column (as it appears in SharePoint) | Type | Required | Notes |
+|---|---|---|---|
+| `Task Name`  | Single line     | ✅ | Card title. Used with `Quarter` as the row's identity. |
+| `Team`       | Single line     |    | `IO` or `SPG` — drives which side of the timeline the card sits on, and its colour. Defaults to `IO` if blank. |
+| `Quarter`    | Number          | ✅ | Must resolve to 1–4. `Qtr 2`, `Q2`, `Quarter 2` and a bare `2` are all accepted. **A row whose Quarter is `0`, blank, or outside 1–4 is not shown** — there is nowhere on the timeline to place it. |
+| `Status`     | Single line     |    | Free text; `Completed` gets the silver pill, anything else navy. |
+| `Leads`      | Multiple lines  |    | One name per line — the app splits on newlines into chips. |
+| `Effort`     | Single line     |    | See the note in §5. |
+| `Labels`     | Multiple lines  |    | Classification tag (e.g. Quick Win, Compliance). Shown as a pill beside Team/Status. |
+| `Department` | Multiple lines  |    | Comma-separated — split into chips. |
+| `Description`| Multiple lines  |    | Shown in the detail panel and the PDF. |
+| `Business POC` | Multiple lines |  | Business owner — the person to ask about the task, not who builds it. PDF only. |
+| `Risks / Issues` | Multiple lines | | Known risks, blockers and open issues. PDF only; blank for most rows. |
+| `Priority`, `Impact`, `Start date`, `Completed Date` | — | | Exist on the live list; **not currently read by the app anywhere.** |
 
-`BusinessPOC` and `RisksIssues` have space-free internal names for the same reason the whole
-schema does: SharePoint encodes a space as `_x0020_` permanently at creation time, so a column
-created through the UI as "Business POC" is `Business_x0020_POC` in every REST response
-thereafter. The provisioning script sets the internal names explicitly and gives them normal
-display names. If these columns already exist on a hand-built list, the app also accepts the
-escaped forms (`Business_x0020_POC`, `Risks_x0020_and_x0020_Issues`) and a plain `Risks`, so
-an existing list keeps working without being rebuilt.
+Only the card title and a valid `Quarter` are actually required — every other field can be
+blank and the row still renders with whatever it has. This is deliberate ("loosen the logic so
+it pulls whatever data it can get"): a task tracker in real use will always have some rows with
+gaps, and a blank `Status` or `Leads` shouldn't be a reason to drop the whole row. Rows missing
+a card title entirely, or whose `Quarter` is not 1–4, are skipped with a console warning rather
+than breaking the render — the intended way to park a task before it has been scheduled is to
+set its Quarter to `0` (or leave it blank), and it stays out of the report until a real quarter
+is assigned. Duplicate title+`Quarter` pairs are de-duplicated with a `#2` suffix and a warning
+— they are not silently dropped.
 
-`Title` is left required-by-SharePoint but unused; the script marks it optional so nobody has
-to type the project name twice.
+`Title` is left required-by-SharePoint but unused; the provisioning script marks it optional so
+nobody has to type the task name twice.
 
 ---
 
