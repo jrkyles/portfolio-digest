@@ -322,14 +322,16 @@ function logSkippedRow(project: Project, hasTitle: boolean, hasQuarter: boolean)
 
 /**
  * The individual signals isSharePointContext() checks, exposed separately so the diagnostic
- * log in fetchProjectData can show WHICH ones fired rather than just the final boolean - this
- * matters because a false negative here is a real, easy-to-hit failure mode: a raw `.html`
- * file opened directly from a document library (rather than through a modern page's Embed web
- * part) is served without SharePoint's own page-rendering pipeline, so `_spPageContextInfo`
- * is never injected. On a standard `*.sharepoint.com` tenant the hostname check still catches
- * it regardless; on a custom/vanity domain, neither check may fire, and the app silently falls
- * back to sample data - it will LOOK like it's working (cards render) while showing fabricated
- * rows instead of the real list. The banner in fetchProjectData is what makes that visible.
+ * log in fetchProjectData can show WHICH ones fired rather than just the final boolean.
+ *
+ * CONFIRMED failure mode (not hypothetical - this is what was actually happening): SharePoint's
+ * "Embed" web part renders an uploaded .html file inside a SANDBOXED IFRAME using `srcdoc`. A
+ * sandboxed srcdoc iframe gets an OPAQUE origin, so `window.location.hostname` inside it is the
+ * empty string - regardless of which real *.sharepoint.com site it's embedded on - and
+ * `_spPageContextInfo` is never injected either, since the page isn't going through SharePoint's
+ * own rendering pipeline. Both signals below come back negative on a page that genuinely is on
+ * SharePoint. This is exactly why fetchProjectData (below) does NOT gate the actual fetch
+ * attempt on `detected` alone - see isDefinitelyLocalDev.
  */
 function getSharePointContextSignals(): { hostname: string; hostnameMatches: boolean; hasPageContextInfo: boolean; detected: boolean } {
   if (typeof window === 'undefined') {
@@ -346,6 +348,29 @@ function getSharePointContextSignals(): { hostname: string; hostnameMatches: boo
  */
 export function isSharePointContext(): boolean {
   return getSharePointContextSignals().detected
+}
+
+/**
+ * The narrow, opposite question to isSharePointContext(): can we rule SharePoint OUT
+ * altogether, so there's no point even attempting the REST call? True only for this app's own
+ * local dev server and a bare `file://` open - the two cases where there is provably no list
+ * to fetch from.
+ *
+ * fetchProjectData attempts the SharePoint call whenever this is false, NOT only when
+ * isSharePointContext() is true. Those are deliberately different conditions: the positive
+ * check (isSharePointContext) has a real, confirmed blind spot (see the comment above), so
+ * requiring it before even trying would mean silently never talking to a real list rendered
+ * inside an Embed web part's sandboxed iframe. Attempting the fetch and falling back to sample
+ * data on failure is strictly more robust than trying to perfectly predict success in advance -
+ * the cost of guessing wrong here is one harmless failed request in the rare case of a truly
+ * unrelated, non-SharePoint hostname; the cost of guessing wrong the other way is silently
+ * showing fabricated data forever on a real deployment.
+ */
+function isDefinitelyLocalDev(): boolean {
+  if (typeof window === 'undefined') return true
+  return window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.protocol === 'file:'
 }
 
 /**
@@ -368,22 +393,38 @@ export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Pr
   const resolvedListName = resolveListName(listName)
   const listSource = resolvedListName !== listName ? 'from ?list= in the URL' : 'the default'
   const signals = getSharePointContextSignals()
+  // Try whenever EITHER signal says yes: a positive detection (signals.detected), or simply
+  // not being able to rule out SharePoint via hostname (!isDefinitelyLocalDev()). Requiring
+  // BOTH - or worse, only the hostname check - would silently drop the case this whole
+  // function exists to handle: `_spPageContextInfo` forcing a positive detection on a host
+  // that otherwise looks like local dev (which is also exactly the shape of the srcdoc-iframe
+  // test setup below - `_spPageContextInfo` set, hostname still jsdom's default 'localhost').
+  const skipEntirely = isDefinitelyLocalDev() && !signals.detected
 
   // Logged unconditionally, first thing - this is the fork every other diagnostic in this
-  // file hangs off of. If `detected` is false on what you know is a real SharePoint page,
-  // that itself is the entire answer to "why isn't my data showing up": nothing past this
-  // point ever talks to SharePoint at all, and everything you see instead is sample data.
+  // file hangs off of. `detected` false does NOT necessarily mean "not on SharePoint" - see
+  // getSharePointContextSignals' comment on the Embed-web-part iframe blind spot - which is
+  // exactly why the branch below attempts the fetch whenever we can't RULE OUT local dev,
+  // rather than only when `detected` is true.
   console.log(
     `%c[Data] Context check - hostname: "${signals.hostname}", ` +
     `matches sharepoint.com/.us: ${signals.hostnameMatches}, ` +
     `_spPageContextInfo present: ${signals.hasPageContextInfo} ` +
-    `=> SharePoint context: ${signals.detected}`,
+    `=> positively detected as SharePoint: ${signals.detected}; ` +
+    `ruled out as local dev: ${skipEntirely}`,
     'font-weight:bold'
   )
   console.log(`[Data] List name: "${resolvedListName}" (${listSource})`)
 
-  if (signals.detected) {
-    console.log('[Data] SharePoint context detected, using REST API')
+  if (!skipEntirely) {
+    console.log(
+      signals.detected
+        ? '[Data] SharePoint context positively detected - trying the list.'
+        : '[Data] Context check was inconclusive (see above) but this is not our own local dev ' +
+          'server, so trying the list anyway rather than assuming it will fail - this is what ' +
+          'correctly reaches a real list even when it\'s rendered inside a sandboxed iframe ' +
+          '(e.g. SharePoint\'s Embed web part), where the context signals above cannot fire.'
+    )
     try {
       return await fetchSharePointListData(resolvedListName)
     } catch (error) {
@@ -391,11 +432,9 @@ export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Pr
       // Fall through to sample-data fallback
     }
   } else {
-    console.warn(
-      '[Data] NOT detected as a SharePoint context - skipping the list entirely and going ' +
-      'straight to sample data. If this page IS on SharePoint, see the comment on ' +
-      'getSharePointContextSignals() above for the most likely reason (a raw .html file ' +
-      'opened directly, on a custom/vanity domain, has neither signal available).'
+    console.log(
+      '[Data] Hostname is localhost/127.0.0.1 (or file://) - this is our own local dev server, ' +
+      'so skipping the SharePoint call entirely rather than firing a request that can only fail.'
     )
   }
 

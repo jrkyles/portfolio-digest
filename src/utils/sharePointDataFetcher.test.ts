@@ -20,6 +20,50 @@ describe('isSharePointContext', () => {
   })
 })
 
+describe('fetchProjectData - the sandboxed-iframe blind spot', () => {
+  const realLocation = window.location
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    Object.defineProperty(window, 'location', { value: realLocation, writable: true, configurable: true })
+  })
+
+  it('still attempts the SharePoint list even when NEITHER context signal fires - the confirmed real-world case of the app being displayed inside a sandboxed iframe (SharePoint\'s Embed web part), where a srcdoc iframe\'s opaque origin makes hostname blank and _spPageContextInfo is never injected', async () => {
+    // Neither signal available - exactly what was observed: hostname "", no _spPageContextInfo.
+    // jsdom's `location.hostname` isn't spy-able directly (non-configurable), so the whole
+    // Location object is swapped for a plain URL-shaped stand-in instead, restored in afterEach.
+    Object.defineProperty(window, 'location', { value: { hostname: '', search: '', protocol: 'https:' }, writable: true, configurable: true })
+    const calledUrls: string[] = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      calledUrls.push(String(url))
+      if (String(url).includes('/_api/web/lists')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { results: [] } }) })
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+
+    await fetchProjectData()
+
+    // The critical assertion: the SharePoint list URL was requested at all, rather than the
+    // app assuming (wrongly) that a blank hostname means "definitely not SharePoint" and
+    // skipping straight to sample data.
+    expect(calledUrls[0]).toContain('/_api/web/lists')
+  })
+
+  it('does NOT attempt the SharePoint list on this app\'s own local dev server (hostname localhost, no page context) - there is genuinely no list to fetch there', async () => {
+    // jsdom's default test hostname is already 'localhost', so no override needed here.
+    const calledUrls: string[] = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      calledUrls.push(String(url))
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+
+    await fetchProjectData()
+
+    expect(calledUrls.some((u) => u.includes('/_api/web/lists'))).toBe(false)
+  })
+})
+
 describe('fetchProjectData', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
