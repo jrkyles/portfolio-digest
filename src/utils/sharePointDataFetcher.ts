@@ -92,6 +92,7 @@ async function probeSharePointConnectivity(): Promise<void> {
       'network-level failure, a CORS block, or this genuinely is not a SharePoint origin at all:',
       err
     )
+    logIfOpaqueOriginError(err)
   }
 }
 
@@ -224,8 +225,39 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
 
   } catch (error) {
     console.error('[SharePoint] Error fetching list data:', error)
+    logIfOpaqueOriginError(error)
     throw error
   }
+}
+
+/**
+ * Recognizes one very specific, CONFIRMED (not theoretical) failure shape: `fetch()` throwing
+ * "Failed to parse URL from /_api/..." for what is, in the source, a perfectly normal relative
+ * URL. A relative URL only fails to parse when the calling document has no real origin/base
+ * URL to resolve it against - an OPAQUE origin. This is exactly what SharePoint's "Embed" web
+ * part produces: it renders an uploaded .html file inside an iframe sandboxed WITHOUT
+ * `allow-same-origin`, which strips the document of any usable origin at all. No amount of
+ * retrying, context-detection, or fallback logic inside this file can work around it - a
+ * relative fetch is structurally impossible without an origin, by browser design, full stop.
+ * The only real fix is on the SharePoint side: stop displaying the file through an Embed web
+ * part, and link directly to its own URL instead (opened as its own page, it gets a real
+ * SharePoint origin and every /_api/... call works exactly as intended). See
+ * docs/SHAREPOINT-DEPLOYMENT.md and deploy/README.txt.
+ */
+function logIfOpaqueOriginError(error: unknown): void {
+  const isParseUrlError = error instanceof TypeError && /Failed to parse URL/i.test(error.message)
+  if (!isParseUrlError) return
+  console.error(
+    '%c[SharePoint] DIAGNOSIS: this page has no real origin to resolve a relative URL against ' +
+    '- "Failed to parse URL" from fetch() means exactly that - almost certainly because it is ' +
+    'displayed inside SharePoint\'s "Embed" web part, which sandboxes the file in an iframe ' +
+    'WITHOUT allow-same-origin. This is not fixable by any code running on this page - a ' +
+    'relative request is impossible without an origin, by browser design.\n' +
+    'FIX (on the SharePoint side, not here): stop using the Embed web part for this file. ' +
+    'Instead link directly to the uploaded .html file\'s own URL so it opens as its own page ' +
+    '- that gives it a real SharePoint origin, and every /_api/... call will work as intended.',
+    'font-weight:bold;color:#c62828'
+  )
 }
 
 /**

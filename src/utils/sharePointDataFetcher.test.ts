@@ -110,6 +110,45 @@ describe('fetchProjectData - connectivity probe', () => {
   })
 })
 
+describe('fetchProjectData - opaque-origin diagnosis', () => {
+  it('names the specific "Embed web part sandboxed iframe" cause when fetch() throws its exact "Failed to parse URL" TypeError for a relative URL - a confirmed real-world failure, not hypothetical', async () => {
+    ;(window as any)._spPageContextInfo = {}
+    global.fetch = vi.fn().mockImplementation((url) => {
+      // Every /_api/... call (the list, and the connectivity probe) hits the opaque-origin
+      // failure, reproduced verbatim from the real error message Chrome throws; the sample-CSV
+      // fallback fetch (unrelated to what's under test here) still succeeds normally.
+      if (String(url).startsWith('/_api/')) {
+        throw new TypeError(`Failed to execute 'fetch' on 'Window': Failed to parse URL from ${url}`)
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await fetchProjectData()
+
+    expect(errorSpy.mock.calls.some((args) =>
+      String(args[0]).includes('DIAGNOSIS') && String(args[0]).includes('Embed')
+    )).toBe(true)
+    errorSpy.mockRestore()
+  })
+
+  it('stays silent about the opaque-origin diagnosis for an ordinary, unrelated fetch failure', async () => {
+    ;(window as any)._spPageContextInfo = {}
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (String(url).startsWith('/_api/')) {
+        return Promise.reject(new Error('Network request failed'))
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await fetchProjectData()
+
+    expect(errorSpy.mock.calls.some((args) => String(args[0]).includes('DIAGNOSIS'))).toBe(false)
+    errorSpy.mockRestore()
+  })
+})
+
 describe('fetchProjectData', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })

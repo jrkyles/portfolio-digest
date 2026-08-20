@@ -36,16 +36,32 @@ MAKING IT REACHABLE — the only tenant-dependent step
 ----------------------------------------------------
 SharePoint Online does not render arbitrary .html from a document library by default.
 
-Upload the file and open its URL:
+Upload the file and open its URL DIRECTLY (not through an Embed web part — see the warning
+below):
 
   - If it RENDERS: you are done. Share that URL.
 
-  - If it DOWNLOADS instead: custom script is blocked on this site. Either enable it for
-    this one site —
+  - If it DOWNLOADS instead: custom script is blocked on this site. Enable it for this one
+    site —
 
         Set-PnPTenantSite -Url <site-url> -NoScriptSite $false
 
-    — or add an Embed web part to a modern SharePoint page pointing at the file's URL.
+    — then open the file's own URL directly again.
+
+
+DO NOT USE AN "EMBED" WEB PART FOR THIS FILE
+---------------------------------------------
+This used to be listed as a fallback option. It is confirmed NOT to work: SharePoint's Embed
+web part renders an uploaded .html file inside a sandboxed iframe, and that sandbox strips
+the page of any real web address (an "opaque origin"). Reading the list needs a normal
+relative web request, and a page with no real address cannot make one — the browser blocks it
+outright, before it ever reaches SharePoint. This is not something that can be fixed by
+changing anything in the file itself.
+
+If the browser console shows an error containing "Failed to parse URL", this is it. The fix
+is not a setting to toggle — it's to stop using the Embed web part and open the file directly
+at its own URL instead (per the steps above). If you want it to feel like part of a page
+rather than a bare file, link to it prominently rather than embedding it.
 
 
 IF IT LOADS BUT SHOWS NO TASKS

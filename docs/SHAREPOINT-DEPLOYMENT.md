@@ -147,13 +147,23 @@ SharePoint Online does not render arbitrary `.html` from a document library by d
 | Situation | What to do |
 |---|---|
 | Custom script is **allowed** on the site | Link users straight at the uploaded file's URL. This is the least-effort path and needs nothing else. |
-| Custom script is **blocked** (the SPO default) | Either enable it for this one site — `Set-PnPTenantSite -Url <site> -NoScriptSite $false` — or add an **Embed** web part on a modern page pointing at the file's URL. |
+| Custom script is **blocked** (the SPO default) | Enable it for this one site — `Set-PnPTenantSite -Url <site> -NoScriptSite $false` — then link directly at the file's URL as above. |
 
 To check which applies before uploading anything: upload the file, open its URL, and see
 whether it renders or downloads. If it downloads, you are in row two.
 
-> If an Embed web part renders blank, that is the tenant blocking inline scripts — the
-> `NoScriptSite` route above is the fix, and it is a per-site setting, not a tenant-wide one.
+**Do not put the file behind an Embed web part.** This used to be listed as a fallback for
+the row-two case and is now confirmed not to work, not just untested: SharePoint's Embed web
+part renders the file inside a sandboxed iframe, and that sandbox strips the page of any real
+origin (an opaque origin — no `hostname`, no base URL at all). Every list read this app does
+is a relative `fetch('/_api/...')`, and a relative URL cannot be resolved without an origin to
+resolve it against — `fetch()` throws `TypeError: Failed to parse URL from /_api/...` and the
+browser never even attempts the network request. This is a browser security boundary, not
+something any code change in this app can route around; the app's own console diagnostics
+(§6 below) recognize this exact error and say so explicitly rather than looking like a plain
+network failure. If you want the file to feel like part of a page rather than a bare link,
+link to it prominently instead of embedding it — a direct link, opened as its own page, has a
+real origin and every `/_api/...` call works as intended.
 
 ---
 
@@ -189,10 +199,25 @@ Other runtime switches: `?debug=1` (layout-violation overlay, dev builds only) a
 ## 6. Verifying a deployment
 
 1. Open the page as a **normal user**, not an admin.
-2. Console should show `[Data] SharePoint context detected, using REST API`.
-   Seeing `[Data] Loading from CSV file` instead means `isSharePointContext()` returned false
-   or the list call failed — check the warning immediately above it.
+2. Open the browser console (F12). Every stage of loading the data logs plainly, in order —
+   this is deliberate, so a deployment problem is diagnosable from the console alone without
+   needing to reproduce it with extra logging added first:
+   - `[Data] Context check - hostname: "...", ...` — first thing logged. Shows exactly what
+     the app can tell about its own environment.
+   - `[SharePoint] Requesting list "..."` and the response status for it.
+   - On success: `[SharePoint] Column names on the first item` and the full first raw row —
+     the actual data SharePoint returned, not a guess.
+   - `[SharePoint] Connectivity probe ...` — a second, list-independent check (`/_api/web`)
+     confirming whether the page can reach SharePoint at all, and which site it lands on.
+   - A final tally: how many rows will render, and why any didn't.
+   - If you see `[Data] USING SAMPLE DATA, NOT YOUR SHAREPOINT LIST` in red, everything on
+     screen is fabricated demo data, not your list — the lines above it say why.
+   - If any message contains **`Failed to parse URL`**, stop looking at the list or its
+     columns entirely — that specific error means the page has no real web address to work
+     from, which happens when it's shown through SharePoint's **Embed** web part. See the
+     warning in §3 above; the fix is to link to the file directly instead.
 3. Card count should match the list item count.
-4. Toggle Timeline ↔ Quarter View; open a card's detail panel.
+4. Toggle Timeline ↔ Quarter View; open a card's detail panel; double-click a card for
+   presentation mode.
 5. Check a narrow window: Quarter View reflows to a single column. Timeline view is designed
    for desktop widths and scales down proportionally, so it gets small on phones.

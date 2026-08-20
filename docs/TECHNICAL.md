@@ -1800,10 +1800,19 @@ This is a tenant-level setting, not something the app or the build can control:
 | Situation | What to do |
 |---|---|
 | Custom script **allowed** on the site | Link straight at the uploaded file's URL — nothing else needed |
-| Custom script **blocked** (the SPO default) | `Set-PnPTenantSite -Url <site> -NoScriptSite $false` for that one site, **or** add an **Embed** web part on a modern page pointing at the file's URL |
+| Custom script **blocked** (the SPO default) | `Set-PnPTenantSite -Url <site> -NoScriptSite $false` for that one site, then link directly at the file's URL as above |
 
 The fast way to find out which applies: upload, open the URL. Renders → done. Downloads
-instead → custom script is blocked, use one of the two remedies above.
+instead → custom script is blocked, use the remedy above.
+
+**Do not put the file behind an Embed web part.** Confirmed, not just untested, not to work:
+the Embed web part renders the file inside a sandboxed iframe, which strips it of any real
+origin (no `hostname`, no base URL at all). Every list read in this app is a relative
+`fetch('/_api/...')` (§3.2), and a relative URL cannot resolve without an origin — `fetch()`
+throws `TypeError: Failed to parse URL from /_api/...` and the request never reaches the
+network. `logIfOpaqueOriginError()` in `sharePointDataFetcher.ts` recognizes this exact error
+and names the cause explicitly in the console rather than letting it read as a generic network
+failure. There is no code-side fix; link to the file directly instead of embedding it.
 
 `deploy/README.txt` is the admin-facing version of this section — plain text, no jargon, meant
 to travel with the file itself rather than assuming the recipient has this document.
@@ -1811,10 +1820,12 @@ to travel with the file itself rather than assuming the recipient has this docum
 ### 15.6 Verification checklist
 
 1. Open as a **normal user**, not an admin.
-2. Console shows `[Data] SharePoint context detected, using REST API`.
-   Seeing `[Data] Loading from CSV file` (or `Using sample rows embedded in the page` on the
-   single-file build) means either `isSharePointContext()` returned false or the list call
-   failed — check the warning immediately above it.
+2. Open the console. It logs every stage in order: the context check, the list request and its
+   response, the actual column names and first raw row on success, a second list-independent
+   `/_api/web` connectivity probe (both after success and after failure), and a final tally of
+   how many rows will render. A red `USING SAMPLE DATA, NOT YOUR SHAREPOINT LIST` line means
+   everything on screen is fabricated demo data - the lines above it say why. A message
+   containing `Failed to parse URL` means the Embed-web-part problem above, specifically.
 3. Card count matches list item count.
 4. Toggle Timeline ↔ Quarter View; open a card's detail panel; close via ×, Escape, and an
    outside click.
@@ -1832,9 +1843,10 @@ to travel with the file itself rather than assuming the recipient has this docum
 | Symptom | Likely cause | Check |
 |---|---|---|
 | Blank page in SharePoint (multi-file `dist/` deploy) | `base` not relative, or the folder structure was not preserved on upload | `grep 'src="' dist/index.html` — must be `./assets/...`; or switch to the single-file build (§15.3) to eliminate this class of bug entirely |
-| Single .html file downloads instead of rendering | Custom script blocked on the site (SPO default) | §15.5 — `NoScriptSite $false` or an Embed web part |
+| Single .html file downloads instead of rendering | Custom script blocked on the site (SPO default) | §15.5 — `NoScriptSite $false`, then link directly (never an Embed web part) |
+| Console shows `Failed to parse URL` anywhere | File is displayed through an Embed web part's sandboxed iframe - it has no real origin, so a relative `fetch()` cannot even construct a URL | §15.5 — not fixable in code; link to the file directly instead |
 | Page loads, no cards | Column internal names wrong | `.../_api/web/lists/getbytitle('<name>')/items` in a browser tab; inspect the returned property names |
-| Falls back to sample data in SharePoint | List call failed | Console `[Data] SharePoint API failed` warning; usually 403 (permissions) or 404 (list name) |
+| Falls back to sample data in SharePoint | List call failed | Console `[Data] SharePoint API call failed` warning names the real error; usually a 403 (permissions), a 404 (list name), or the opaque-origin `Failed to parse URL` case above |
 | Some rows missing | Failed validation | Console `[SharePoint] Skipping ...` — needs `Project`, `Team`, and a `Quarter` of 1–4 |
 | Duplicate-looking cards with `#2` | Duplicate `Project`+`Quarter` | Console warning names the collision; fix in the list |
 | Cards overlap | Layout invariant broken | `?debug=1` in dev; red outlines and a violation list |
