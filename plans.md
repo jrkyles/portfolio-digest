@@ -19,10 +19,30 @@ Today there are two ways to get real data into the dashboard:
    one person loaded.
 
 Neither gives senior leadership a "just open the link, see current data" experience without
-either an admin action or a repeated manual step. This plan is the third option: **automate
-the manual step** — a scheduled job re-exports the list, rebuilds the file with that data
-baked in, and re-uploads it, so the file on SharePoint keeps itself current without a human
-doing it by hand.
+either an admin action or a repeated manual step. This plan is a **third, additional** option:
+**automate the manual step** — a scheduled job re-exports the list, rebuilds the file with
+that data baked in, and re-uploads it, so a file on SharePoint keeps itself current without a
+human doing it by hand.
+
+### 1.1 This adds a version — it does not replace the existing one
+
+**The live-fetch build described in `docs/TECHNICAL.md` §1–§16 is not going anywhere.** Two
+things are true regardless of whether this plan is ever built:
+
+- **The app's own code always tries the real, live SharePoint list first**, on every load,
+  regardless of what data happens to be embedded as its fallback — see `fetchProjectData()` in
+  `src/utils/sharePointDataFetcher.ts`, and `docs/SHAREPOINT-DEPLOYMENT.md` §1 ("tries the
+  real list unless it can positively rule out being on SharePoint at all"). Baking real data in
+  as the *fallback* doesn't touch that logic at all. If `NoScriptSite` gets fixed tomorrow,
+  live data starts winning immediately on *any* build, automated or not — the two approaches
+  are not in competition with each other.
+- **The current build (fabricated sample fallback, live-fetch primary, manual "Load CSV/XLSX"
+  available) stays exactly as it is, as its own deployable file.** This plan's pipeline
+  produces a **separate, additional artifact** — proposed as
+  `deploy/InnovationPortfolioDigest-AutoRefresh.html`, not a replacement of
+  `deploy/InnovationPortfolioDigest.html` — so both remain available as distinct choices. Which
+  one actually gets uploaded to SharePoint at any given time is a deployment decision, not
+  something this plan makes for you by deleting the alternative.
 
 ---
 
@@ -76,10 +96,12 @@ needs to be made explicitly, not discovered later.
 │       (Sites.Selected permission, scoped to just this one site)      │
 │  4. Convert the Graph response into a CSV                            │
 │       (same shape mapRowToProject already tolerates - §3.5/§17.2)    │
-│  5. npm run build:single, embedding the REAL export                  │
-│       instead of the fabricated sample CSV                           │
-│  6. Upload/overwrite the built file back into the SharePoint         │
-│       document library via Graph                                     │
+│  5. Build a SEPARATE artifact embedding the REAL export -             │
+│       InnovationPortfolioDigest-AutoRefresh.html, not a rebuild       │
+│       of InnovationPortfolioDigest.html (§1.1 - additive, not a       │
+│       replacement; the fabricated-sample build keeps existing too)   │
+│  6. Upload that file to SharePoint via Graph - to its OWN filename,   │
+│       never overwriting the existing manually-built one              │
 │  7. On any failure: fail the workflow loudly (visible in GitHub's    │
 │       Actions tab; optionally also post to Teams/Slack/email)        │
 └─────────────────────────────────────────────────────────────────────┘
@@ -131,7 +153,10 @@ pipeline only automates the "rebuild and re-upload" step a person does manually 
   - `AZURE_CLIENT_SECRET`
   - `SHAREPOINT_SITE_ID` (or the site path Graph needs to resolve it)
   - `SHAREPOINT_LIST_ID` (or the list display name — `Status Report Tracking Information`)
-  - Target upload path (e.g. `/sites/<site>/SiteAssets/InnovationPortfolioDigest.html`)
+  - Target upload path — its **own** filename, e.g.
+    `/sites/<site>/SiteAssets/InnovationPortfolioDigest-AutoRefresh.html`. Deliberately
+    distinct from the existing `InnovationPortfolioDigest.html` (§1.1) — the workflow must
+    never target the manually-built file's path.
 - Add the new workflow file, `.github/workflows/refresh-data.yml` (not yet written — §7).
 - Decide the schedule cadence (§6).
 
@@ -144,13 +169,16 @@ pipeline only automates the "rebuild and re-upload" step a person does manually 
   call today — `sharePointDataFetcher.ts` is entirely browser-side, ambient-cookie
   authentication, which has no equivalent for an unattended script.
 - **A "real data" build mode** for `scripts/bundle-singlefile.mjs` — right now it always embeds
-  `public/sample-timeline-data.csv` (fabricated demo data, safe to ship, safe to commit). This
-  needs a way to embed a *different*, real CSV instead, gated so that a plain local
-  `npm run build:single` still produces the safe demo-data build by default — real portfolio
-  data must never be something a developer can accidentally bake into a build they run on
-  their own machine and might casually share or commit. Likely shape: an environment variable
-  or CLI flag (e.g. `EMBED_DATA_FILE=/tmp/live-export.csv npm run build:single`) that only the
-  CI workflow ever sets.
+  `public/sample-timeline-data.csv` (fabricated demo data, safe to ship, safe to commit), and
+  always writes to `deploy/InnovationPortfolioDigest.html`. This needs a way to embed a
+  *different*, real CSV **and** write to a *different* output filename
+  (`InnovationPortfolioDigest-AutoRefresh.html`, per §1.1), gated so that a plain local
+  `npm run build:single` still produces the existing safe demo-data build, at its existing
+  path, by default — real portfolio data must never be something a developer can accidentally
+  bake into a build they run on their own machine and might casually share or commit, and the
+  existing artifact must never be silently overwritten by this new mode. Likely shape: an
+  environment variable or CLI flag (e.g. `EMBED_DATA_FILE=/tmp/live-export.csv npm run
+  build:single`) that only the CI workflow ever sets, which also switches the output filename.
 - **A small upload step** — either inside `fetch-live-data.mjs` or a separate script — that
   `PUT`s the built file to
   `https://graph.microsoft.com/v1.0/sites/{site-id}/drive/root:/{path}:/content`.
