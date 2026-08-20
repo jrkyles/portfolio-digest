@@ -23,10 +23,12 @@ function mockCsvFetch(csvText) {
 
 beforeEach(() => {
   mockCsvFetch(SAMPLE_CSV)
+  window.localStorage.clear()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  window.localStorage.clear()
 })
 
 describe('App', () => {
@@ -114,5 +116,45 @@ describe('App', () => {
       expect(screen.queryByText('No tasks')).not.toBeInTheDocument()
     }, { timeout: 3000 })
     expect((await screen.findAllByRole('button', { name: /Document Intake Automation/ }, { timeout: 3000 })).length).toBeGreaterThan(0)
+  })
+})
+
+describe('App - manually loaded data (LoadDataButton)', () => {
+  it('replaces the displayed data with a loaded file, shows the loaded-from banner, and persists it across a reload', async () => {
+    render(<App />)
+    await screen.findByRole('button', { name: /Document Intake Automation/ }, { timeout: 2000 })
+
+    const loadedCsv = 'Project,Team,Quarter,Status\nManually Loaded Task,SPG,Qtr 4,Completed\nManually Loaded IO Task,IO,Qtr 1,In Progress'
+    const file = new File([loadedCsv], 'my-export.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText('Load task data from a CSV or Excel file'), file)
+
+    expect(await screen.findByRole('button', { name: /Manually Loaded Task/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Document Intake Automation/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/Loaded from/)).toHaveTextContent('my-export.csv')
+
+    // Re-mount (simulates a page reload) without touching localStorage - the loaded file
+    // should win again on its own, not silently fall back to the live/sample fetch.
+    const { unmount } = render(<App />)
+    unmount()
+    render(<App />)
+    expect(await screen.findByRole('button', { name: /Manually Loaded Task/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Document Intake Automation/ })).not.toBeInTheDocument()
+  })
+
+  it('"Use live data" discards the loaded file and goes back through the normal fetch', async () => {
+    render(<App />)
+    await screen.findByRole('button', { name: /Document Intake Automation/ }, { timeout: 2000 })
+
+    const loadedCsv = 'Project,Team,Quarter,Status\nManually Loaded Task,SPG,Qtr 4,Completed\nManually Loaded IO Task,IO,Qtr 1,In Progress'
+    const file = new File([loadedCsv], 'my-export.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText('Load task data from a CSV or Excel file'), file)
+    expect(await screen.findByRole('button', { name: /Manually Loaded Task/ })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Use live data/ }))
+
+    expect(await screen.findByRole('button', { name: /Document Intake Automation/ }, { timeout: 2000 })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Manually Loaded Task/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Loaded from/)).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('portfolio-digest:manual-data')).toBeNull()
   })
 })

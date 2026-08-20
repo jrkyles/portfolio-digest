@@ -11,6 +11,8 @@ import DetailPanel from './components/DetailPanel'
 import PrintSheet from './components/PrintSheet'
 import PrintPreview from './components/PrintPreview'
 import PrintButton from './components/PrintButton'
+import LoadDataButton from './components/LoadDataButton'
+import LoadedDataBanner from './components/LoadedDataBanner'
 import PresentationMode from './components/PresentationMode'
 import { getProjectId } from './utils/dataParser'
 import { fetchProjectData } from './utils/sharePointDataFetcher'
@@ -26,6 +28,27 @@ const packingStrategy = new URLSearchParams(window.location.search).get('packing
   ? 'bin-packing'
   : 'round-robin'
 
+// Persists a manually-loaded file's data (LoadDataButton) across reloads, in THIS browser
+// only. There is no server-side counterpart - loading a file updates only the device that
+// loaded it. Namespaced (not just "data") since localStorage is shared across every page on
+// the same origin, and this app can be embedded alongside other content on a SharePoint site.
+const MANUAL_DATA_STORAGE_KEY = 'portfolio-digest:manual-data'
+
+function readManualDataFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(MANUAL_DATA_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed?.projects) || !parsed.projects.length) return null
+    return parsed
+  } catch (error) {
+    // Corrupt/foreign JSON under this key shouldn't crash the app on load - treat it the same
+    // as "nothing saved" and let the normal SharePoint/sample-data path take over instead.
+    console.warn('[Data] Could not read previously-loaded file from storage:', error)
+    return null
+  }
+}
+
 // NOTE: App.jsx originally imported `calculateProjectPositions` from
 // './utils/positioningLogic_cssAware' — that file wasn't present in the export.
 // Rewired below to call useMeasuredCards + layout() directly (the same pattern
@@ -40,6 +63,10 @@ function App() {
   const [dataStatus, setDataStatus] = useState('loading') // 'loading' | 'error' | 'loaded'
   const [errorMessage, setErrorMessage] = useState(null)
   const [showPrintPreview, setShowPrintPreview] = useState(false)
+  // Non-null exactly when `projects` currently holds a manually-loaded file's data rather
+  // than the SharePoint list (or its sample-data fallback) - drives the LoadedDataBanner and
+  // gates the mount effect below from overwriting a loaded file with a fetch on refresh.
+  const [manualOverride, setManualOverride] = useState(null)
   const panelRef = useRef(null)
 
   // Presentation mode: an index into `presentationOrder` rather than a project object, so
@@ -109,6 +136,17 @@ function App() {
   }, [viewMode])
 
   useEffect(() => {
+    // A previously-loaded file (LoadDataButton) takes priority over a fresh fetch on mount -
+    // otherwise every page reload would silently discard it and fall back to the live/sample
+    // path, defeating the entire point of loading a file in the first place. Explicitly
+    // clearing it (LoadedDataBanner's "Use live data") is the only way back to a live fetch.
+    const saved = readManualDataFromStorage()
+    if (saved) {
+      setProjects(saved.projects)
+      setManualOverride({ fileName: saved.fileName, loadedAt: saved.loadedAt })
+      setDataStatus('loaded')
+      return
+    }
     loadProjectData()
   }, [])
 
@@ -191,10 +229,10 @@ function App() {
       const parsedData = await fetchProjectData()
       if (parsedData.length === 0) {
         // Not "check the Project/Team/Quarter columns" - those are this app's own internal
-        // field names, not literal SharePoint column requirements (see
-        // sharePointDataFetcher.ts's transformSharePointItem). Pointing at the browser
-        // console instead is more honest: it logs the list's actual column names and, per
-        // row, exactly which requirement (a title, or a valid Quarter) was missing.
+        // field names, not literal SharePoint column requirements (see dataParser.ts's
+        // mapRowToProject). Pointing at the browser console instead is more honest: it logs
+        // the list's actual column names and, per row, exactly which requirement (a title, or
+        // a valid Quarter) was missing.
         throw new Error('No valid task rows were found. Open the browser console for the exact reason per row.')
       }
       setProjects(parsedData)
@@ -204,6 +242,31 @@ function App() {
       setErrorMessage(error.message || 'Something went wrong loading the task data.')
       setDataStatus('error')
     }
+  }
+
+  // LoadDataButton's onLoad - a manually-picked file always wins immediately, regardless of
+  // what's currently on screen (live data, sample data, or a previous loaded file), and
+  // persists across reloads until explicitly cleared (handleClearManualOverride below).
+  const handleDataLoaded = (parsedData, meta) => {
+    setProjects(parsedData)
+    setManualOverride(meta)
+    setDataStatus('loaded')
+    setErrorMessage(null)
+    try {
+      window.localStorage.setItem(MANUAL_DATA_STORAGE_KEY, JSON.stringify({ projects: parsedData, ...meta }))
+    } catch (error) {
+      // Not fatal - the loaded data still renders for this session, it just won't survive a
+      // reload (e.g. localStorage full or disabled). Worth knowing about, not worth blocking on.
+      console.warn('[Data] Loaded file could not be saved for next time:', error)
+    }
+  }
+
+  // LoadedDataBanner's "Use live data" - discards the saved file and goes back through the
+  // normal SharePoint/sample-data path, exactly as if none had ever been loaded.
+  const handleClearManualOverride = () => {
+    window.localStorage.removeItem(MANUAL_DATA_STORAGE_KEY)
+    setManualOverride(null)
+    loadProjectData()
   }
 
   const handleProjectClick = (project) => {
@@ -393,9 +456,17 @@ function App() {
         both header rows already carry their own primary control. Fixed so it stays reachable
         while scrolling; z-index sits below the detail panel and presentation mode so those
         still cover it. */}
-    <div className="no-print" style={{ position: 'fixed', top: 14, right: 18, zIndex: 45 }}>
+    <div className="no-print" style={{ position: 'fixed', top: 14, right: 18, zIndex: 45, display: 'flex', gap: 8 }}>
+      <LoadDataButton onLoad={handleDataLoaded} />
       <PrintButton onClick={() => setShowPrintPreview(true)} />
     </div>
+    {manualOverride && (
+      <LoadedDataBanner
+        fileName={manualOverride.fileName}
+        loadedAt={manualOverride.loadedAt}
+        onClear={handleClearManualOverride}
+      />
+    )}
     {/* No bg-white here on purpose - AmbientBackground sits just behind this (z-index -1)
         over the page's own white base (index.css), and an opaque background here would
         hide it completely. */}

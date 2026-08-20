@@ -4,10 +4,10 @@ Internal engineering documentation. Covers architecture, algorithms, the reasoni
 non-obvious decisions, and operational runbooks.
 
 - **Repository:** https://github.com/jrkyles/portfolio-digest
-- **Stack:** React 18 · Vite 5 · Framer Motion 10 · Tailwind 3 · TypeScript (partial) · Vitest 4
-- **Deployment target:** a single self-contained HTML file in SharePoint, reading a SharePoint list
-- **Bundle size:** ~320 KB JS (102 KB gzip), ~16 KB CSS (4.2 KB gzip); single-file build ~580 KB (seal + sample data inlined)
-- **Tests:** 85 across 11 files
+- **Stack:** React 18 · Vite 5 · Framer Motion 10 · Tailwind 3 · SheetJS (xlsx) · TypeScript (partial) · Vitest 4
+- **Deployment target:** a single self-contained HTML file in SharePoint, reading a SharePoint list (or a manually-loaded CSV/Excel export - §17)
+- **Bundle size:** ~697 KB JS (225 KB gzip), ~16 KB CSS (4.2 KB gzip); single-file build ~950 KB (seal + sample data inlined). SheetJS (Excel parsing, §17.3) accounts for most of the JS - ~322 KB / ~102 KB gzip without it.
+- **Tests:** 106 across 13 files
 
 ---
 
@@ -28,11 +28,13 @@ non-obvious decisions, and operational runbooks.
 13. [Animation inventory](#13-animation-inventory)
 14. [Testing](#14-testing)
 15. [Build and deployment](#15-build-and-deployment)
-16. [Troubleshooting](#16-troubleshooting)
-17. [Performance](#17-performance)
-18. [Extension points](#18-extension-points)
-19. [Known gaps and technical debt](#19-known-gaps-and-technical-debt)
-20. [Appendix](#20-appendix)
+16. [Deployment blocker: the SharePoint custom-script restriction](#16-deployment-blocker-the-sharepoint-custom-script-restriction)
+17. [Manual data loading (CSV/XLSX)](#17-manual-data-loading-csvxlsx)
+18. [Troubleshooting](#18-troubleshooting)
+19. [Performance](#19-performance)
+20. [Extension points](#20-extension-points)
+21. [Known gaps and technical debt](#21-known-gaps-and-technical-debt)
+22. [Appendix](#22-appendix)
 
 ---
 
@@ -97,7 +99,7 @@ Consequences, all of them deliberate:
   to find out where something is, which is what makes the layout engine a set of pure,
   testable functions.
 - The trade-off is that at very small viewports the whole thing scales down uniformly rather
-  than reflowing. See §19.2.
+  than reflowing. See §21.2.
 
 This same principle — compute geometry from known data rather than measuring the DOM live,
 and drive it with a mechanism that cannot be reset out from under an in-flight animation —
@@ -1083,7 +1085,7 @@ reason in reverse: a much bigger surface needs a bigger angle to register at all
 | `AmbientBackground.jsx` | Drifting gradient blobs + mouse parallax | `useReducedMotion()`-gated |
 | `BrandHeader` / `BrandMark` | Masthead variants | Full vs. compact badge |
 | `SectionHeader.jsx` | Title + breathing gradient bar | 22 s, `repeatType: 'mirror'` |
-| `ViewToggle.jsx` | Segmented control | See §19.4 for the a11y gap |
+| `ViewToggle.jsx` | Segmented control | See §21.4 for the a11y gap |
 | `DebugOverlay.jsx` | Live invariant visualisation | `?debug=1` + DEV only |
 
 ### 9.1 `ProjectCardSimple` details
@@ -1640,25 +1642,27 @@ have.
 | Print preview fade-in | Framer | 180 ms opacity only (no exit — see §11.7's reasoning, reused here for the same failure mode) |
 
 **Reduced motion:** `AmbientBackground` respects `useReducedMotion()`. Other animations do not
-currently branch on it — see §19.
+currently branch on it — see §21.
 
 ---
 
 ## 14. Testing
 
-**85 tests across 11 files.** Vitest 4 + Testing Library + jsdom, configured in `vite.config.js`.
+**106 tests across 13 files.** Vitest 4 + Testing Library + jsdom, configured in `vite.config.js`.
 
 | File | Tests | Focus |
 |---|---|---|
+| `sharePointDataFetcher.test.ts` | 21 | Context detection incl. the opaque-origin/sandboxed-iframe case, connectivity probe, fallback, pagination, dedup, `?list=` |
 | `layout.test.ts` | 14 | Packing, gap cycling, overlap resolution, determinism |
-| `sharePointDataFetcher.test.ts` | 11 | Context detection, fallback, pagination, dedup, `?list=` |
+| `DetailPanel.test.jsx` | 10 | Both variants, chip splitting, empty fields, Label pill |
 | `dataParser.test.ts` | 10 | RFC4180 cases, header dedup, collisions, quarter normalisation |
-| `DetailPanel.test.jsx` | 9 | Both variants, chip splitting, empty fields, Label pill |
 | `QuarterBoxView.test.jsx` | 9 | Grouping, zoom, keyboard nav |
+| `App.test.jsx` | 8 | Load, error, retry, view toggle, manually-loaded data persists/clears (§17) |
 | `ProjectCardSimple.test.jsx` | 7 | Hit target, deferred single-click, hover callbacks, reveal |
 | `shiftCards.test.ts` | 7 | Shift direction, depth, sibling reconciliation |
-| `App.test.jsx` | 6 | Load, error, retry, view toggle |
 | `QuarterBoxCard.test.jsx` | 6 | Hover reveal, deferred single-click, double-click suppresses it, `data-project-card` |
+| `fileImport.test.ts` | 5 | CSV and real binary XLSX parsing, real-world column names, unsupported-type/unusable-row handling |
+| `LoadDataButton.test.jsx` | 3 | Successful load, empty-file error, unreadable-file error |
 | `ViewToggle.test.jsx` | 3 | Selection state |
 | `ProjectSection.test.jsx` | 3 | Only the hovered card reveals |
 
@@ -1805,14 +1809,11 @@ This is a tenant-level setting, not something the app or the build can control:
 The fast way to find out which applies: upload, open the URL. Renders → done. Downloads
 instead → custom script is blocked, use the remedy above.
 
-**Do not put the file behind an Embed web part.** Confirmed, not just untested, not to work:
-the Embed web part renders the file inside a sandboxed iframe, which strips it of any real
-origin (no `hostname`, no base URL at all). Every list read in this app is a relative
-`fetch('/_api/...')` (§3.2), and a relative URL cannot resolve without an origin — `fetch()`
-throws `TypeError: Failed to parse URL from /_api/...` and the request never reaches the
-network. `logIfOpaqueOriginError()` in `sharePointDataFetcher.ts` recognizes this exact error
-and names the cause explicitly in the console rather than letting it read as a generic network
-failure. There is no code-side fix; link to the file directly instead of embedding it.
+**Do not put the file behind an Embed web part**, and don't reach it by clicking through a
+document library's own listing view either — both are confirmed, not just untested, not to
+work, and neither is fixable from the app side. §16 is the full diagnosis: what actually
+breaks, why no code change or permission level can route around it, the one real fix, and
+what to do if that fix genuinely isn't obtainable.
 
 `deploy/README.txt` is the admin-facing version of this section — plain text, no jargon, meant
 to travel with the file itself rather than assuming the recipient has this document.
@@ -1825,7 +1826,7 @@ to travel with the file itself rather than assuming the recipient has this docum
    `/_api/web` connectivity probe (both after success and after failure), and a final tally of
    how many rows will render. A red `USING SAMPLE DATA, NOT YOUR SHAREPOINT LIST` line means
    everything on screen is fabricated demo data - the lines above it say why. A message
-   containing `Failed to parse URL` means the Embed-web-part problem above, specifically.
+   containing `Failed to parse URL` means the opaque-origin/custom-script problem - §16.
 3. Card count matches list item count.
 4. Toggle Timeline ↔ Quarter View; open a card's detail panel; close via ×, Escape, and an
    outside click.
@@ -1838,13 +1839,279 @@ to travel with the file itself rather than assuming the recipient has this docum
 
 ---
 
-## 16. Troubleshooting
+## 16. Deployment blocker: the SharePoint custom-script restriction
+
+**Confirmed via a real deployment attempt, not theoretical.** This section exists because it
+cost several rounds of console-log diagnosis to isolate, and the answer should not need to be
+rediscovered from scratch a second time.
+
+### 16.1 Symptom
+
+The app loads (JS runs, sample data renders fine), but the real SharePoint list never
+populates. The console shows:
+
+```
+TypeError: Failed to execute 'fetch' on 'Window': Failed to parse URL from /_api/web/lists/getbytitle('...')/items?$top=5000
+```
+
+Every stack frame is `about:srcdoc:...`, and `[Data] Context check` logs `hostname: ""`.
+
+### 16.2 Root cause
+
+`fetch()` throws `Failed to parse URL` for a relative path only when the calling document has
+**no real origin** to resolve it against at all — not a wrong origin, no origin. That happens
+when a page is rendered inside an iframe sandboxed *without* `allow-same-origin`, which gives
+it an **opaque origin**: no `hostname`, no base URL, nothing a relative URL can resolve
+against. This is not a bug in this app's fetch logic — it is what the browser does, by design,
+for exactly that situation. `logIfOpaqueOriginError()` in `sharePointDataFetcher.ts` recognizes
+this specific error and names the cause in the console rather than letting it read as a generic
+network failure.
+
+Two different-looking SharePoint UI paths both produce this same opaque-origin iframe:
+
+- Adding the file via an **Embed web part** on a page.
+- Clicking the file from **inside a document library's own listing view** (the URL bar shows
+  `.../Forms/AllItems.aspx?id=...` rather than the file's own address) — SharePoint's built-in
+  file-preview experience, which also sandboxes the content.
+
+Both are symptoms of the same underlying platform setting, not two separate bugs: **the site
+collection has `NoScriptSite` (a.k.a. `DenyAddAndCustomizePages`) set to block custom
+script — the SharePoint Online default for every site.** When that flag is set, SharePoint
+does not let an uploaded `.html` file ever become a real, standalone page with its own origin,
+*regardless of how a user tries to reach it* — a direct link, an Embed web part, or the
+library's click-to-preview all route through the same sandboxed rendering path. There is no
+way to reach the file that avoids this while the flag is set on that site.
+
+### 16.3 What does NOT fix this (all confirmed, not assumed)
+
+- **Uploader's permission level.** The block is a property of the *site*, not of who uploads
+  the file. A Global Administrator uploading the exact same file to a site with `NoScriptSite`
+  still set hits the identical error. Site Collection Administrator rights do not include the
+  ability to change this flag — it's deliberately reserved for tenant-level roles specifically
+  so a site owner cannot unilaterally bypass org security policy from within their own site.
+- **Single-file build vs. multi-file `dist/`.** The restriction is based on the file being
+  `.html` and capable of running script when rendered — not on whether that script is inlined
+  (the single-file build, §15.3) or referenced via `<script src>` (the multi-file `dist/`
+  build). Both are blocked identically. Using `dist/` instead would only reintroduce the
+  asset-path-resolution risk the single-file build was built to eliminate, on top of the same
+  unsolved blocker.
+- **Any client-side code change.** Detection heuristics, retry logic, alternate fetch
+  strategies — none of it matters, because the browser refuses to construct the request URL
+  before any of this app's JavaScript gets a chance to run.
+
+### 16.4 The fix, and its actual scope
+
+A **SharePoint Administrator** or **Global Administrator** (not Site Collection Administrator —
+see §16.3) runs, once, for this one site:
+
+```powershell
+Set-PnPTenantSite -Url "https://<tenant>.sharepoint.com/sites/<site>" -NoScriptSite $false
+# or, via SharePoint Online Management Shell:
+Set-SPOSite -Identity "https://<tenant>.sharepoint.com/sites/<site>" -DenyAddAndCustomizePages $false
+```
+
+This is genuinely narrow in scope, which is worth being explicit about when requesting it:
+
+- It targets **one site collection by URL** — it does not touch any other site, and does not
+  change the tenant-wide default applied to sites created in the future.
+- It is **not further scopable within the site** — once set, custom script is allowed
+  *anywhere* on that site (any page, any file), not just for this one uploaded `.html` file.
+  There is no per-file version of this setting.
+
+After it runs, link directly to the file's own URL (right-click the file in the library →
+**Copy link**) — not through an Embed web part, and not by clicking the file from inside the
+library's listing view, since a **modern document library, by default, still routes a click
+through its own file-preview experience even once script is allowed** on some tenants; if the
+direct link still shows `Forms/AllItems.aspx?id=...` in the address bar after this change,
+navigate to the file's raw path directly instead of clicking its row.
+
+### 16.5 If that permission genuinely cannot be obtained
+
+Three real alternatives exist. None is a redeploy of the current build — each is a different
+enough architecture that it means rebuilding, not repackaging. Presented roughly in order of
+"closest to what exists today" to "furthest":
+
+**A. SPFx web part, deployed to a site collection app catalog.** SharePoint Framework
+solutions are explicitly exempt from `NoScriptSite` — that is the entire reason SPFx exists as
+a supported extensibility model, trusted through package deployment rather than ad-hoc script
+injection. A **site collection app catalog** (distinct from the tenant-wide app catalog) can,
+on most tenants, be created and used by a Site Collection Administrator without needing
+SharePoint Administrator or Global Administrator — tenant policy permitting. This is the
+closest thing to "no tenant-admin touchpoint" that exists for keeping the *current* rich,
+interactive experience.
+  - Cost: SPFx uses its own toolchain (Yeoman/webpack), not Vite, and expects the app packaged
+    as a web part class rather than a standalone mounted-at-`#root` page. Most of the React
+    component code would carry over; the build and deployment wrapper would not.
+
+**B. SharePoint's native List/Column JSON Formatting.** Zero admin permission needed at all,
+and works immediately, because it is a *declarative* JSON schema SharePoint's own trusted
+renderer interprets — not arbitrary script — so it is explicitly allowed even on
+`NoScriptSite` sites.
+  - Cost: this is not this app. It can add conditional colors, icons, and basic templated
+    layout to the native list view. It cannot replicate the timeline, the hover-expand
+    physics, presentation mode, or the PDF export. Choosing this means substituting a
+    fundamentally simpler deliverable, not reskinning the same one.
+
+**C. Host off-SharePoint entirely, with real OAuth** (an Entra ID app registration + MSAL +
+Microsoft Graph, reading the list via `GET /sites/{site}/lists/{list}/items` instead of
+SharePoint's own relative REST endpoint). Since the app would no longer be same-origin with
+SharePoint at all, the site's `NoScriptSite` setting becomes irrelevant to it.
+  - Cost: a real rebuild of the data and auth layer (§3 entirely) — bearer-token
+    authentication via MSAL instead of ambient session cookies, and Microsoft Graph's item
+    shape instead of the `d.results` REST shape `transformSharePointItem` expects today.
+  - Admin dependency, reduced but not eliminated: registering the Entra ID app is usually
+    self-service (tenant policy permitting), but the Graph permission scope it requests
+    typically still needs one-time **admin consent**. That consent is scoped per-application
+    (approving this app does not affect any other), and can be narrowed further with the
+    `Sites.Selected` permission, which grants the app *zero* site access by default until an
+    admin explicitly grants it access to one named site — the closest Graph equivalent to
+    "just this list, nothing else."
+
+None of these three is a quick fix. Getting the one-line `NoScriptSite` command run (§16.4) is,
+by a wide margin, the least total effort of any path that keeps the app as it is today.
+
+---
+
+## 17. Manual data loading (CSV/XLSX)
+
+The direct answer to §16 for whoever can't get `NoScriptSite` flipped, or doesn't want to
+wait on it: **`LoadDataButton`** (top-right, next to the PDF button) lets anyone load a CSV or
+Excel export of the list straight from disk, in the browser, with zero network dependency.
+
+### 17.1 Why this genuinely sidesteps §16
+
+Everything in §16 is about the browser refusing to make a *network request* from a page with
+no real origin. A local `<input type="file">` read via the File/FileReader API involves no
+network request at all - the browser hands the file's bytes directly to JavaScript. It works
+identically whether the page is rendered through a sandboxed Embed web part, downloaded and
+opened from a Downloads folder, or served normally - none of §16's restrictions have any
+surface to attach to here.
+
+### 17.2 One shared field-mapping for every ingestion path
+
+`mapRowToProject`, `buildFieldLookup`, `pickField`, `unescapeSharePointName`, and
+`isUsableProject` all now live in `dataParser.ts`, not `sharePointDataFetcher.ts` - moved
+there because they are no longer SharePoint-specific. A CSV or Excel export of the list
+carries the exact same real-world column names the live REST payload does ("Task Name" vs
+`Project`, "Department" vs `Departments`, ...), so it needs the identical tolerant,
+case/spacing/punctuation-insensitive matching described in §3.5, not a second copy of it.
+Three ingestion paths - the SharePoint REST fetch, a `.csv` file, an `.xlsx`/`.xls` file - all
+funnel through this one function. This is deliberate: the app's own field-mapping bug (§3.5)
+happened once already because a mapping assumption drifted out of sync with reality; giving
+every path a single shared implementation is what makes that class of bug structurally unable
+to recur between paths.
+
+One real behavioural difference remains between the SharePoint path and the file paths, on
+purpose: `projectsFromRows` (used by both CSV and XLSX ingestion, via `parseCSV` and
+`fileImport.ts` respectively) spreads each row's own original columns onto the output object
+in addition to the canonical mapped fields - so a genuinely duplicate header column (e.g. a
+second "Team" column, deduplicated to `Team_2`) survives and is inspectable. The SharePoint
+REST path (`mapRowToProject` called directly in `sharePointDataFetcher.ts`) does not do this -
+there is no reason to carry SharePoint's internal metadata fields (`Id`, `__metadata`, ...)
+onto every `Project` object when nothing downstream ever reads them.
+
+### 17.3 XLSX parsing (`src/utils/fileImport.ts`)
+
+`parseSpreadsheetFile(file)` branches on extension: `.csv` goes straight through the existing
+`parseCSV`; `.xlsx`/`.xls` reads the file as an `ArrayBuffer`, parses it with SheetJS
+(`XLSX.read`), converts the first sheet to row objects (`XLSX.utils.sheet_to_json`, with
+`defval: ''` so a blank cell produces an empty string rather than an absent key - `pickField`
+needs to tell "present but blank" apart from "column doesn't exist under this name", and an
+omitted key would collapse that distinction), and hands the rows to the same
+`projectsFromRows` the CSV path uses.
+
+**A genuinely unsupported file type or an unreadable workbook throws**, rather than
+warn-and-continue the way a single bad *row* does - picking the wrong file entirely is a
+mistake worth surfacing directly to whoever just clicked Load, not silently producing an
+empty dashboard. `LoadDataButton.jsx` catches this and shows a dismissible inline error; it
+also treats a *successfully parsed* file that yields zero usable rows as an error too (same
+reasoning as `App.jsx`'s "no valid task rows" case, §3.9), rather than silently accepting an
+empty override.
+
+**Dependency note:** the `xlsx` package published to the public npm registry carries two
+unpatched, high-severity CVEs (prototype pollution, ReDoS - `npm audit` flags both with "No
+fix available"). SheetJS's own recommended remedy is installing their patched build directly
+from their CDN rather than npm's registry mirror, which is what `package.json` does:
+
+```json
+"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+```
+
+Pinned to an exact version (not a moving CDN "latest") for reproducible installs. `npm audit`
+is clean of xlsx-related findings with this source; the two remaining findings
+(`esbuild`/`vite`) are pre-existing devDependency issues unrelated to this change, affecting
+only the local dev server, not anything shipped.
+
+**Bundle size cost:** SheetJS is a substantial library - the multi-file JS bundle grew from
+~320 KB to ~697 KB minified (~225 KB gzip) with it included, and the single-file build grew
+from ~585 KB to ~950 KB accordingly. Code-splitting it behind a dynamic `import()` was
+considered and rejected: the single-file build (§15.3) inlines every script tag it finds into
+one file regardless of how many chunks Vite draws internally, so splitting would not reduce
+the deployed file's actual size at all - the bytes still have to be somewhere the browser can
+reach, and for this deployment target there is only ever one file.
+
+**A real bug this dependency caused in the bundler itself, worth recording exactly because it
+was silent at build time.** `scripts/bundle-singlefile.mjs`'s CSV-embedding step used to do
+`html.replace('</body>', ...)` - a plain string replace, which JavaScript resolves against
+only the *first* match in the document. Adding `xlsx` broke this: SheetJS's own source bundles
+an internal HTML-table-export writer whose template constants literally contain the string
+`"</body></html>"` (its own closing wrapper for a standalone HTML export it can produce) -
+sitting, once bundled, *earlier in the file* than the app's real closing tag. `.replace()`
+found and "closed" the sample-data `<script>` block there instead, splicing it into the middle
+of the JS bundle rather than the end of the document. The build reported success (nothing was
+left un-inlined; the "no leftover reference" check still passed - it isn't the right check for
+this failure mode), and the page loaded far enough to run its JS, so the corruption only
+surfaced as an obviously-broken page when actually opened - React's own error text ("Invalid
+HTML: could not find...") appeared as literal *visible body text*, since the browser's HTML
+parser had already closed the real `<script>` element early and treated everything past that
+point as ordinary page content, not code. Fixed by anchoring the replace to
+`/<\/body>\s*<\/html>\s*$/` (only matches the genuine end of the document, immune to an
+arbitrary earlier `</body>`-shaped substring anywhere in bundled dependency code) and adding a
+build-time structural check - the bundler now verifies its own output ends with a real
+`</body></html>` and contains exactly one embedded-data tag, failing loudly rather than
+shipping a structurally corrupted file that merely happens to reference nothing external.
+**Lesson generalised:** a plain, unanchored string `.replace()` against a large bundle that
+includes third-party code is never provably safe, no matter how "unlikely" the collision seems
+- anchor to structure, not to a bare substring.
+
+### 17.4 Persistence and precedence (`App.jsx`)
+
+A loaded file is saved to `localStorage` (key `portfolio-digest:manual-data`) and **takes
+priority over a fresh fetch on every subsequent mount**, including a real page reload - the
+mount effect checks storage first and, if a saved file is found, uses it directly without
+ever calling `fetchProjectData()`. This is deliberate: silently discarding a loaded file on
+refresh would defeat the entire point of loading one. The only way back to a live fetch is
+the explicit **"Use live data"** control in `LoadedDataBanner`, which clears the storage key
+and re-triggers the normal SharePoint/sample-data path from scratch.
+
+Loading a *new* file always wins immediately over whatever is currently displayed - live
+data, sample data, or a previously loaded file - with no confirmation step. `LoadedDataBanner`
+stays on screen the entire time a loaded file is active specifically so this is never a silent
+state: for a leadership-facing report, whether what's on screen is live or a fixed snapshot
+from a specific file and moment is itself information a viewer needs, not just the data.
+
+**This is per-browser, per-device, not synced anywhere.** Loading a file on one machine has
+no effect on what anyone else sees when they open the same deployed page - each viewer's
+`localStorage` is their own. There is no mechanism here for one person's loaded file to
+become the default everyone sees; that is exactly the gap the GitHub Actions
+bake-and-redeploy idea (discussed but not yet built) would close.
+
+### 17.5 Component reference addition
+
+| File | Responsibility |
+|---|---|
+| `LoadDataButton.jsx` | File picker trigger; parses via `fileImport.ts`, reports success/error, has no opinion on what happens to a successful result |
+| `LoadedDataBanner.jsx` | Persistent "Loaded from X · timestamp" indicator + the "Use live data" clear control, shown only while a manual override is active |
+
+---
+
+## 18. Troubleshooting
 
 | Symptom | Likely cause | Check |
 |---|---|---|
 | Blank page in SharePoint (multi-file `dist/` deploy) | `base` not relative, or the folder structure was not preserved on upload | `grep 'src="' dist/index.html` — must be `./assets/...`; or switch to the single-file build (§15.3) to eliminate this class of bug entirely |
-| Single .html file downloads instead of rendering | Custom script blocked on the site (SPO default) | §15.5 — `NoScriptSite $false`, then link directly (never an Embed web part) |
-| Console shows `Failed to parse URL` anywhere | File is displayed through an Embed web part's sandboxed iframe - it has no real origin, so a relative `fetch()` cannot even construct a URL | §15.5 — not fixable in code; link to the file directly instead |
+| Single .html file downloads instead of rendering | Custom script blocked on the site (SPO default) | §16 — this is the same root cause as the row below, just a different symptom of it |
+| Console shows `Failed to parse URL` anywhere | The page has no real origin - it's being rendered inside a sandboxed iframe (Embed web part, or even the document library's own click-to-preview) | §16 — full diagnosis, why nothing on the app side can fix it, and every realistic path forward |
 | Page loads, no cards | Column internal names wrong | `.../_api/web/lists/getbytitle('<name>')/items` in a browser tab; inspect the returned property names |
 | Falls back to sample data in SharePoint | List call failed | Console `[Data] SharePoint API call failed` warning names the real error; usually a 403 (permissions), a 404 (list name), or the opaque-origin `Failed to parse URL` case above |
 | Some rows missing | Failed validation | Console `[SharePoint] Skipping ...` — needs `Project`, `Team`, and a `Quarter` of 1–4 |
@@ -1858,14 +2125,14 @@ to travel with the file itself rather than assuming the recipient has this docum
 | Presentation swipe moves the text but not the card | Swipe variants applied to the content div instead of the `bg-white` card surface | §11.4 — the animated element must be the card surface itself |
 | PDF preview and the real printout disagree | Print styling accidentally duplicated instead of shared | §12.3 — both must render through the same `.print-sheet`/`.print-table` rules, kept outside `@media print` |
 | `BusinessPOC`/`RisksIssues` blank from a hand-built list | Column created with a space in the internal name | §3.5 — either rename via the provisioning script's convention, or rely on the `_x0020_`-escaped fallback already in `transformSharePointItem` |
-| Text tiny on mobile | Expected in Timeline view | §19.2 — use Quarter View |
+| Text tiny on mobile | Expected in Timeline view | §21.2 — use Quarter View |
 | Dead scroll below content | Measurement container escaping | §6.2 — needs the zero-sized clipping wrapper |
 | `window is not defined` in tests | Ran vitest from the wrong directory | `cd` to project root |
 | A single-click test assertion fails intermittently | Missing `await waitFor(...)` after §10's deferred click | §14.2, item 6 |
 
 ---
 
-## 17. Performance
+## 19. Performance
 
 - **Layout is computed once** per data load, memoised on `[projects, measurements]`. Hover does
   not recompute lane packing — only shifts, which are `O(cards)` with distance culling and a
@@ -1884,13 +2151,17 @@ to travel with the file itself rather than assuming the recipient has this docum
 - **`ProjectCardSimple` is memoised** with an explicit comparator, so a hover re-renders only
   the cards whose rects actually changed — typically the hovered card plus 4–7 neighbours out
   of ~19.
-- **Bundle:** ~320 KB JS / 102 KB gzip (multi-file build); the single-file build is ~580 KB
+- **Bundle:** ~697 KB JS / 225 KB gzip (multi-file build); the single-file build is ~950 KB
   because it also carries the base64-encoded seal image and the embedded sample CSV inline —
   those never ship in a real SharePoint deployment's actual data path (the list is), only in
-  the fallback. Framer Motion is the dominant JS dependency. Removing it entirely is now
-  plausible for the timeline path and presentation mode's FLIP (both are CSS-driven), but
-  quarter view, the detail panel, the stage squeeze, and presentation mode's tilt/swipe/reveal
-  still depend on it.
+  the fallback. **SheetJS (`xlsx`, §17.3) is now the single largest dependency** — roughly
+  375 KB of the JS bundle is SheetJS alone; without it the bundle is ~322 KB / ~102 KB gzip.
+  Code-splitting it behind a dynamic `import()` was considered and rejected (§17.3): the
+  single-file build inlines every script tag into one file regardless of chunk boundaries, so
+  splitting would not reduce the deployed file's actual size. Framer Motion is the next
+  largest dependency. Removing it entirely is plausible for the timeline path and
+  presentation mode's FLIP (both are CSS-driven), but quarter view, the detail panel, the
+  stage squeeze, and presentation mode's tilt/swipe/reveal still depend on it.
 
 Practical ceiling: this is designed for tens of tasks. Several hundred would need the leader
 lines and per-card DOM reconsidered; several thousand would need virtualisation, and the
@@ -1901,7 +2172,7 @@ printed pages rather than being summarised or truncated.
 
 ---
 
-## 18. Extension points
+## 20. Extension points
 
 **Change hover feel** — `EXPAND_MS` / `EXPAND_EASE` / `PUSH_MS` / `PUSH_EASE` in `constants.ts`.
 Nothing else needs touching.
@@ -1947,67 +2218,67 @@ what actually prints.
 
 ---
 
-## 19. Known gaps and technical debt
+## 21. Known gaps and technical debt
 
-**19.1 `dist/` and `deploy/` are committed, not built by CI.** This is intentional (§15.1) —
+**21.1 `dist/` and `deploy/` are committed, not built by CI.** This is intentional (§15.1) —
 the repo is meant to be clonable as a ready-to-deploy artefact — but it does mean both outputs
 can drift from source if someone forgets to re-run `npm run build:single` after a change. There
 is no CI check that fails a PR when the committed build is stale.
 
-**19.2 Timeline view on mobile.** At 375 px the stage scales to ~23%, rendering body text at
+**21.2 Timeline view on mobile.** At 375 px the stage scales to ~23%, rendering body text at
 roughly 3 px — unreadable. Quarter View reflows to a single column and is fine. No auto-switch
 is implemented; options are switching views under a breakpoint, allowing horizontal scroll at a
 minimum legible scale, or hiding the toggle on small screens.
 
-**19.3 Google Fonts CDN in the multi-file build.** `index.html` still loads Inter from
+**21.3 Google Fonts CDN in the multi-file build.** `index.html` still loads Inter from
 `fonts.googleapis.com` for the `npm run build` output, even though the single-file build
 (§15.3) already establishes that Inter is unused and drops the reference entirely. The
 multi-file build's `index.html` was not updated to match — a cheap, low-risk cleanup (delete
 the two `<link>` tags) that simply has not been done yet.
 
-**19.4 `ViewToggle` accessibility.** Has `role="tablist"` / `role="tab"` but no arrow-key
+**21.4 `ViewToggle` accessibility.** Has `role="tablist"` / `role="tab"` but no arrow-key
 navigation and no `aria-controls` / `tabpanel` relationship — an incomplete ARIA tab contract.
 
-**19.5 Team colours hardcoded in three places** — `ProjectTimeline.jsx`, `App.jsx`, and
+**21.5 Team colours hardcoded in three places** — `ProjectTimeline.jsx`, `App.jsx`, and
 `useMeasuredCards.tsx` — instead of using `TEAM_COLORS` / `getTeamColor`. Low risk, real drift
 hazard.
 
-**19.6 `QuarterGrid` uses `bg-gray-400`** — the one piece of chrome not on the navy/silver brand
+**21.6 `QuarterGrid` uses `bg-gray-400`** — the one piece of chrome not on the navy/silver brand
 palette.
 
-**19.7 No favicon.** SharePoint tabs show the default icon.
+**21.7 No favicon.** SharePoint tabs show the default icon.
 
-**19.8 `Effort` column semantics** — see §3.8.
+**21.8 `Effort` column semantics** — see §3.8.
 
-**19.9 Cross-view magic-move for timeline cards** was dropped in the CSS-transition rewrite
+**21.9 Cross-view magic-move for timeline cards** was dropped in the CSS-transition rewrite
 (§8.2). Presentation mode's manual FLIP (§11.2) is a separate, purpose-built replacement for
 the double-click case specifically, not a general restoration of shared-element transitions.
 
-**19.10 Reduced-motion coverage is partial.** Only `AmbientBackground` branches on
+**21.10 Reduced-motion coverage is partial.** Only `AmbientBackground` branches on
 `useReducedMotion()`. Presentation mode's tilt, swipe, and FLIP entrance all animate
 unconditionally — someone with `prefers-reduced-motion: reduce` set still gets the full
 Z-depth approach and swipe travel.
 
-**19.11 TypeScript is partial.** `src/layout/` and `src/utils/` are `.ts`; components — including
+**21.11 TypeScript is partial.** `src/layout/` and `src/utils/` are `.ts`; components — including
 the newer `PresentationMode.jsx`, `PrintSheet.jsx`, `PrintPreview.jsx`, and
 `useSingleOrDoubleClick.js` — are `.jsx`/`.js`. There is no `tsc --noEmit` step in CI, so type
 errors in the typed files would only surface at runtime (Vite strips types without checking).
 
-**19.12 `BusinessPOC`/`RisksIssues` are print-only.** They exist in the `Project` type, the CSV,
+**21.12 `BusinessPOC`/`RisksIssues` are print-only.** They exist in the `Project` type, the CSV,
 the SharePoint mapping, and the print sheet, but not in `DetailPanel.jsx` or
 `PresentationMode.jsx` (§3.8, §3.9). This is a deliberate current scope decision, not an
 oversight, but it means the print sheet is the only surface where these two fields are visible
 at all — worth revisiting if either field turns out to matter for the on-screen reading
 experience, not just the exported report.
 
-**19.13 Presentation mode and `PresentationMode`/`ProjectCardSimple` share a duplicated
+**21.13 Presentation mode and `PresentationMode`/`ProjectCardSimple` share a duplicated
 FLIP/no-rAF pattern rather than a common helper** — see the trade-off note at the end of §11.2.
 
 ---
 
-## 20. Appendix
+## 22. Appendix
 
-### 20.1 File inventory
+### 22.1 File inventory
 
 ```
 src/
@@ -2029,6 +2300,8 @@ src/
 │   ├── PrintSheet.jsx             spreadsheet table, print + preview — §12
 │   ├── PrintPreview.jsx           on-screen proof before window.print() — §12.2
 │   ├── PrintButton.jsx            entry point, fixed top-right — §12.4
+│   ├── LoadDataButton.jsx         manual CSV/XLSX file picker — §17
+│   ├── LoadedDataBanner.jsx       "loaded from X" indicator + clear control — §17.4
 │   ├── AmbientBackground.jsx      drifting blobs
 │   ├── BrandHeader.jsx            full masthead
 │   ├── BrandMark.jsx              compact seal + eyebrow
@@ -2044,8 +2317,9 @@ src/
 │   ├── ScaledStage.jsx            transform scaling
 │   └── DebugOverlay.jsx           dev visualisation
 └── utils/
-    ├── dataParser.ts              RFC4180 tokenizer + identity + normalizeQuarter
-    └── sharePointDataFetcher.ts   REST + embedded/CSV fallback
+    ├── dataParser.ts              RFC4180 tokenizer + shared field-mapping (mapRowToProject) — §17.2
+    ├── sharePointDataFetcher.ts   REST + embedded/CSV fallback + connectivity probe
+    └── fileImport.ts              CSV/XLSX file parsing for LoadDataButton — §17.3
 
 docs/     SHAREPOINT-DEPLOYMENT.md, HOW-IT-WORKS.txt, TECHNICAL.md
 scripts/  Provision-PortfolioList.ps1, bundle-singlefile.mjs
@@ -2054,7 +2328,7 @@ dist/     committed multi-file Vite build output (npm run build)
 deploy/   committed single-file handover artefact + README.txt (npm run build:single)
 ```
 
-### 20.2 Glossary
+### 22.2 Glossary
 
 | Term | Meaning |
 |---|---|
@@ -2070,7 +2344,7 @@ deploy/   committed single-file handover artefact + README.txt (npm run build:si
 | **Presentation order** | The stable, view-independent task ordering (IO before SPG, by quarter, by name) that presentation mode's arrows step through |
 | **Single-file build** | The `npm run build:single` output — one `.html` file with JS/CSS/seal/sample-data all inlined, zero external requests |
 
-### 20.3 Sample data
+### 22.3 Sample data
 
 `public/sample-timeline-data.csv` — 24 **fabricated** rows, deterministically generated
 (seeded), with a deliberately dense 8-card Q2/IO cluster to exercise lane packing and

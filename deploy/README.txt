@@ -21,11 +21,11 @@ permissions to grant. A viewer sees exactly the rows their own list permissions 
 
 TWO THINGS ARE REQUIRED
 -----------------------
-1. The list must exist on the site, with the exact column internal names in the schema.
-   scripts/Provision-PortfolioList.ps1 creates it correctly in one command. Creating the
-   columns by hand is the most common cause of "it loads but shows nothing", because
-   SharePoint permanently freezes a column's internal name at creation time — a column
-   first created as "Due Month" stays "Due_x0020_Month" forever, even after renaming.
+1. The list must exist on the site. Column names are matched tolerantly (case, spacing and
+   punctuation don't matter, and a column titled "Task Name" or "Department" is recognized
+   the same as "Project" or "Departments"), so a list built by hand in the browser generally
+   works as-is. scripts/Provision-PortfolioList.ps1 will still create a brand-new list
+   correctly in one command if you're starting from scratch.
 
 2. The HTML file must be uploaded to the SAME site as that list (Site Assets is the usual
    place). Same-site is what makes the relative API call work; hosted elsewhere it is
@@ -81,3 +81,19 @@ untouched.
 POINTING IT AT A DIFFERENT LIST
 -------------------------------
 Append ?list=<List Display Name> to the URL. No rebuild needed.
+
+
+IF THE LIVE CONNECTION ISN'T WORKING YET (e.g. still waiting on the NoScriptSite fix)
+--------------------------------------------------------------------------------------
+There's a "Load CSV/XLSX" button, top-right next to the PDF button. Export the list to a
+CSV or Excel file (SharePoint's own "Export to Excel", or a CSV export from any list view),
+then click that button and pick the file - no network connection needed at all, so this
+works regardless of the NoScriptSite issue above.
+
+The loaded file is saved in that browser only - it survives a page reload on the same
+device, but doesn't affect what anyone else sees. Click "Use live data" in the small banner
+that appears to discard it and try the real list again.
+
+This is a manual, one-person-at-a-time workaround, not a live connection - it will not
+auto-update, and each person who wants current data has to repeat the export-and-load steps
+themselves. The real fix is still getting the NoScriptSite change made above.

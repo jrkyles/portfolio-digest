@@ -93,8 +93,24 @@ if (existsSync(csvPath)) {
     console.error('[bundle] FAILED - sample CSV contains "</script" and cannot be embedded.')
     process.exit(1)
   }
-  html = html.replace('</body>',
-    `<script type="text/csv" id="embedded-sample-data">\n${csv}\n</script>\n</body>`)
+  // Anchored to the actual END of the document (</body> immediately followed by </html> and
+  // nothing but trailing whitespace), NOT a plain `html.replace('</body>', ...)` on the first
+  // match - a plain string replace corrupted this exact file once already. Now that `xlsx`
+  // (SheetJS) is bundled, its own source contains an internal HTML-export template literally
+  // containing the string `"</body></html>"` (its own writer for exporting a sheet as a
+  // standalone HTML page) - `.replace()` on a bare string finds only the FIRST occurrence,
+  // which was that literal deep inside the JS bundle, not the real closing tag, and silently
+  // spliced the CSV <script> block into the middle of the app's own code instead of the end
+  // of the document. The failure was silent at build time (the bundler logged success) and
+  // only surfaced as a broken page in the browser - hence the anchor and the hard failure
+  // below if it doesn't match, rather than trusting a bare substring match ever again here.
+  const bodyCloseEnd = /<\/body>\s*<\/html>\s*$/
+  if (!bodyCloseEnd.test(html)) {
+    console.error('[bundle] FAILED - could not find the document\'s actual closing </body></html> to embed sample data before. A dependency likely contains its own "</body>" string earlier in the bundle (this happened once already, with SheetJS) - do not fall back to a plain substring replace.')
+    process.exit(1)
+  }
+  html = html.replace(bodyCloseEnd,
+    (match) => `<script type="text/csv" id="embedded-sample-data">\n${csv}\n</script>\n${match}`)
   inlined.push('sample-timeline-data.csv (embedded)')
 }
 
@@ -115,3 +131,37 @@ if (leftover) {
   process.exit(1)
 }
 console.log('[bundle] verified: no external file references remain.')
+
+// Structural sanity check, separate from the "no leftover references" check above - that
+// check only catches an asset that never got inlined, not a document that got corrupted
+// while assembling an otherwise fully-inlined result. This is exactly what happened once
+// already: the CSV embed step silently spliced its <script> block into the middle of the JS
+// bundle instead of before the real closing tag, and every "no leftover reference" signal
+// still passed, because nothing was left un-inlined - the page was just structurally broken.
+//
+// Checking "ends with </body></html>" ALONE is not enough to catch a repeat of that exact
+// bug: the injected template's own tail also ends in "</body>", so even a WRONGLY-placed
+// splice leaves the document's true, untouched final </body></html> exactly where it always
+// was - the corruption is invisible to a check that only looks at the very end of the file.
+// This instead requires the embedded-data script's OWN closing </script> to be immediately
+// (whitespace only) followed by the real closing tags, which is the actual invariant that
+// failed last time.
+const embeddedTagCount = (html.match(/id="embedded-sample-data"/g) || []).length
+if (embeddedTagCount > 1) {
+  console.error(`[bundle] FAILED - found ${embeddedTagCount} "embedded-sample-data" tags, expected at most 1.`)
+  process.exit(1)
+}
+const tailPattern = embeddedTagCount === 1
+  ? /<script type="text\/csv" id="embedded-sample-data">[\s\S]*<\/script>\s*<\/body>\s*<\/html>\s*$/
+  : /<\/body>\s*<\/html>\s*$/
+if (!tailPattern.test(html)) {
+  console.error(
+    '[bundle] FAILED - the document structure is corrupted: it either does not end with a ' +
+    'genuine </body></html>, or (if an embedded-data script is present) that script is not ' +
+    'positioned immediately before it. A dependency\'s own code very likely contains a ' +
+    'string that collided with something earlier in this build step - this happened once ' +
+    'already with SheetJS\'s internal "</body></html>" template constant.'
+  )
+  process.exit(1)
+}
+console.log('[bundle] verified: document structure is intact.')

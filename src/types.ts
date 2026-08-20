@@ -13,18 +13,20 @@ export type Quarter = 'Qtr 1' | 'Qtr 2' | 'Qtr 3' | 'Qtr 4'
 export type Team = 'IO' | 'SPG'
 
 /**
- * Raw project data from CSV.
+ * Raw project data - the shape every ingestion path (SharePoint REST, a pasted/uploaded CSV,
+ * an uploaded XLSX) normalises down to. Field names here are this app's OWN canonical names,
+ * not necessarily any source's literal column names - `mapRowToProject` in `dataParser.ts` is
+ * the single place that maps a raw row's real-world column names (which vary: "Project" vs
+ * "Task Name", "Departments" vs "Department", ...) onto this shape, via a tolerant,
+ * case/spacing/punctuation-insensitive lookup rather than exact property access. Adding a
+ * field means adding it to this interface AND to `mapRowToProject`'s candidate-name list, or
+ * it silently arrives as undefined regardless of source.
  *
- * Field names here are also the CSV header names and the SharePoint *internal* column names -
- * parseCSV maps headers to keys verbatim, and transformSharePointItem reads `item.<Name>`.
- * Adding a field means touching all three together (CSV header, transformSharePointItem,
- * and the provisioning script's schema), or it silently arrives as undefined.
- *
- * `BusinessPOC` / `RisksIssues` are spelled without spaces on purpose: SharePoint escapes a
- * space in an internal name as `_x0020_` permanently at creation time, so a column created
- * as "Business POC" is forever `Business_x0020_POC` in the REST payload. Creating them with
- * space-free internal names avoids that trap entirely; transformSharePointItem still accepts
- * the escaped forms in case the columns already exist on a list built by hand.
+ * `BusinessPOC` / `RisksIssues` are spelled without spaces in THIS canonical shape so a
+ * freshly-provisioned SharePoint list (scripts/Provision-PortfolioList.ps1) never depends on
+ * SharePoint's internal-name escaping (`_x0020_` for a space) at all - but `mapRowToProject`
+ * still accepts "Business POC" / "Risks / Issues" and their escaped forms as source column
+ * names, for a list or export that already has them under a different name.
  */
 export interface Project {
   Year: string

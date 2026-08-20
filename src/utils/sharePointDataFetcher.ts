@@ -1,5 +1,5 @@
 import type { Project } from '@/types'
-import { getProjectId, normalizeQuarter, parseCSV } from './dataParser'
+import { getProjectId, parseCSV, mapRowToProject, isUsableProject } from './dataParser'
 
 /**
  * SharePoint REST API data fetcher.
@@ -37,8 +37,9 @@ export const EMBEDDED_SAMPLE_ID = 'embedded-sample-data'
 // wrong the moment the real list's column names drift from it, which is exactly what
 // happened: the live list was built with "Task Name" instead of "Project", "Department"
 // instead of "Departments", "Labels" instead of "Label" - none of which match this app's
-// internal field names verbatim. See buildFieldLookup/pickField below for how matching is
-// actually done - not by direct property access.
+// internal field names verbatim. See mapRowToProject in dataParser.ts (shared with the CSV/
+// XLSX file-import path in fileImport.ts) for how matching is actually done - not by direct
+// property access.
 type SharePointListItem = Record<string, any>
 
 /**
@@ -196,9 +197,9 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
     let missingTitle = 0
     let badQuarter = 0
     const projects: Project[] = items
-      .map(item => transformSharePointItem(item))
+      .map(item => mapRowToProject(item))
       .filter((project) => {
-        const { valid, hasTitle, hasQuarter } = validateProject(project)
+        const { valid, hasTitle, hasQuarter } = isUsableProject(project)
         if (!hasTitle) missingTitle++
         if (!hasQuarter) badQuarter++
         if (!valid) logSkippedRow(project, hasTitle, hasQuarter)
@@ -216,7 +217,7 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
       console.warn(
         '[SharePoint] Every item was fetched but ZERO passed validation - almost always a ' +
         'column-name mismatch (compare "Column names on the first item" above against the ' +
-        'candidate names each field checks in transformSharePointItem, in this file) rather ' +
+        'candidate names each field checks in mapRowToProject, in dataParser.ts) rather ' +
         'than genuinely empty data.'
       )
     }
@@ -261,98 +262,6 @@ function logIfOpaqueOriginError(error: unknown): void {
 }
 
 /**
- * Reverses SharePoint's internal-name escaping: any character SharePoint won't allow
- * literally in an internal name is encoded as `_xHHHH_` (the character's hex Unicode code
- * point) at column-creation time and stays that way forever, regardless of later display-name
- * renames. A column created through the UI as "Business POC" is `Business_x0020_POC`
- * (`0x0020` = space) in every REST response for the life of the list; "Risks / Issues" comes
- * back with both the space AND the slash escaped. This undoes exactly that encoding, so a
- * literal internal name and its human-readable display name normalise to the same thing.
- */
-function unescapeSharePointName(name: string): string {
-  return name.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-}
-
-/** Lowercase, alphanumeric-only key - collapses case, whitespace, and punctuation differences
- * ("Risks / Issues" / "risks-issues" / "RisksIssues" all normalise identically) on top of the
- * SharePoint-escaping fix above. */
-function normalizeFieldKey(name: string): string {
-  return unescapeSharePointName(name).toLowerCase().replace(/[^a-z0-9]/g, '')
-}
-
-/**
- * Builds a normalized-key lookup from a raw list item, once per row, so every field read
- * below is resilient to internal-name escaping and to reasonable real-world naming drift
- * without an ever-growing list of literal `||` fallbacks. This is what actually fixes "the
- * list wasn't populating": the app previously read `item.Project` and `item.Departments`
- * directly, but the live list's real columns are named "Task Name" and "Department" - neither
- * matches, so every row's `Project` came back empty and every row failed validation.
- * Normalization alone doesn't bridge a genuine name difference like "Project" vs "Task Name"
- * (those are different words, not just different formatting), which is why pickField below
- * still takes an explicit list of plausible names per field - but it means each of THOSE names
- * only has to be listed once, in whatever casing/spacing is natural, rather than needing every
- * escaped/cased/spaced variant spelled out by hand.
- */
-function buildFieldLookup(item: SharePointListItem): Map<string, any> {
-  const lookup = new Map<string, any>()
-  for (const [key, value] of Object.entries(item)) {
-    lookup.set(normalizeFieldKey(key), value)
-  }
-  return lookup
-}
-
-/** First non-blank value among the given candidate column names (checked in order), or ''.
- * Blank/whitespace-only values are treated the same as absent, so a genuinely empty cell
- * doesn't shadow a differently-named column later in the candidate list that actually has
- * data - this is the "loosen the logic so it pulls whatever it can get" half of the fix. */
-function pickField(lookup: Map<string, any>, ...candidateNames: string[]): string {
-  for (const name of candidateNames) {
-    const value = lookup.get(normalizeFieldKey(name))
-    if (value !== undefined && value !== null && String(value).trim()) {
-      return String(value).trim()
-    }
-  }
-  return ''
-}
-
-/**
- * Transform a raw SharePoint list item into this app's Project shape.
- *
- * Candidate names per field are the union of this app's own schema (Provision-PortfolioList.ps1,
- * for a list the script created) and the live list's actual columns as of this fix (a list
- * someone set up by hand): "Task Name" for the card title, "Department" (singular) for
- * Departments, "Labels" (plural) for Label, "Risks / Issues" for RisksIssues. Month/Day/Year
- * are read too, in case a future list schema restores them, but the live list has none of the
- * three - they simply come back '' via pickField, which every consumer already renders fine
- * (DetailPanel/PresentationMode fall back to an em dash rather than a bare space; see there).
- * The list also has Priority/Impact/Start date/Completed Date columns that this app does not
- * currently surface anywhere - not read here, since there is nowhere for them to go yet, but
- * they would slot into this same pickField pattern if that changes.
- */
-function transformSharePointItem(item: SharePointListItem): Project {
-  const lookup = buildFieldLookup(item)
-  return {
-    Year: pickField(lookup, 'Year'),
-    // Normalised to canonical 'Qtr 1'-'Qtr 4'; anything else becomes '' and is rejected
-    // by validateProject below rather than defaulting into Q1.
-    Quarter: (normalizeQuarter(pickField(lookup, 'Quarter')) || '') as any,
-    Month: pickField(lookup, 'Month'),
-    Day: pickField(lookup, 'Day'),
-    Team: (pickField(lookup, 'Team') || 'IO') as any,
-    Project: pickField(lookup, 'Project', 'Task Name', 'TaskName', 'Title'),
-    Status: (pickField(lookup, 'Status') || 'In Progress') as any,
-    Leads: pickField(lookup, 'Leads'),
-    Effort: pickField(lookup, 'Effort'),
-    Label: pickField(lookup, 'Label', 'Labels'),
-    Departments: pickField(lookup, 'Departments', 'Department'),
-    Description: pickField(lookup, 'Description'),
-    BusinessPOC: pickField(lookup, 'BusinessPOC', 'Business POC'),
-    RisksIssues: pickField(lookup, 'RisksIssues', 'Risks / Issues', 'Risks and Issues', 'Risks'),
-    'Sum of Label Row Signed': pickField(lookup, 'Sum of Label Row Signed', 'SumOfLabelRowSigned') || '0'
-  }
-}
-
-/**
  * Detect duplicate Project+Quarter ids among List items and disambiguate with a suffix +
  * console warning, rather than letting a later row silently overwrite an earlier one
  * wherever ids are looked up downstream - mirrors dataParser.ts's parseCSV, since a List
@@ -373,29 +282,9 @@ function disambiguateDuplicateIds(projects: Project[]): Project[] {
   })
 }
 
-/**
- * Validate that project has required fields, and report exactly which requirement (if any)
- * failed - used both for the per-row console warning and the aggregate skip-reason tally in
- * fetchSharePointListData, so the two never drift out of sync with each other.
- *
- * Only a title and a resolvable Quarter are actually required - Team always defaults to 'IO'
- * in transformSharePointItem, so it can never be the reason a row is rejected here, and every
- * other field renders blank rather than gating the row at all ("loosen the logic so it pulls
- * whatever it can get" - see docs/SHAREPOINT-DEPLOYMENT.md §2).
- */
-function validateProject(project: Project): { valid: boolean; hasTitle: boolean; hasQuarter: boolean } {
-  // Quarter has already been normalised in transformSharePointItem, so a non-empty value
-  // here is guaranteed to be one of 'Qtr 1'-'Qtr 4'. Rows whose Quarter was 0, blank, or
-  // otherwise outside 1-4 arrive as '' and are dropped: they exist in the tracker but
-  // aren't scheduled into a quarter, and there is nowhere on the timeline to put them.
-  const hasTitle = !!project.Project
-  const hasQuarter = !!project.Quarter
-  return { valid: hasTitle && hasQuarter, hasTitle, hasQuarter }
-}
-
 /** Logs exactly which requirement a rejected row failed, not a blanket "needs
  * Project/Team/Quarter" - Project/Team aren't literal SharePoint column names this app
- * requires anymore (see transformSharePointItem's pickField candidates), so a message
+ * requires anymore (see mapRowToProject's pickField candidates in dataParser.ts), so a message
  * implying they are is itself misleading when read on a real deployment. */
 function logSkippedRow(project: Project, hasTitle: boolean, hasQuarter: boolean): void {
   const reasons = []

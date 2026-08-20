@@ -8,17 +8,21 @@ list using the signed-in user's existing session.
 
 ## 1. How data flows
 
-`src/utils/sharePointDataFetcher.ts` picks a source at runtime:
+`src/utils/sharePointDataFetcher.ts` tries the real list unless it can positively rule out
+being on SharePoint at all:
 
 ```
-isSharePointContext()  →  yes  →  REST: /_api/web/lists/getbytitle('<List>')/items
-                       →  no   →  public/sample-timeline-data.csv   (local dev)
+this app's own dev server (localhost/127.0.0.1)?  →  yes → public/sample-timeline-data.csv
+                                                    →  no  → REST: /_api/web/lists/getbytitle('<List>')/items
 ```
 
-`isSharePointContext()` is true when the hostname contains `sharepoint.com` / `sharepoint.us`,
-or when SharePoint's `_spPageContextInfo` global is present on the page.
+That "unless" matters: it's deliberately **not** gated on first detecting a SharePoint
+hostname. A page shown through SharePoint's Embed web part (or a document library's own
+click-to-preview) has no real hostname to detect at all — see §16 of `docs/TECHNICAL.md` for
+the full story — so the app tries the real list by default and only skips it when it can
+prove there's nothing to try.
 
-Two things follow from this:
+Two things follow from the REST path specifically:
 
 - **Same-origin is required.** The relative `/_api/...` URL only resolves — and only picks up
   the viewer's auth cookies — when the app is served *from the same SharePoint site* it reads
@@ -28,7 +32,9 @@ Two things follow from this:
   permissions.
 
 If the list call fails for any reason, the app falls back to the bundled sample CSV rather
-than showing an empty page. Watch the browser console for `[Data] SharePoint API failed`.
+than showing an empty page — unless a file has been manually loaded (§7 below), which always
+takes priority over both the live list and the sample fallback. Open the browser console:
+every stage logs plainly, in order, including exactly why a fallback happened.
 
 ---
 
@@ -54,8 +60,9 @@ Concretely, each app field accepts any of these column names (unescaped, case/sp
 
 If a real list ever uses some *other* reasonable name for one of these fields and rows still
 don't populate, that name just isn't in the list above yet — add it to the `pickField(...)`
-call for that field in `transformSharePointItem()` (`src/utils/sharePointDataFetcher.ts`)
-rather than renaming the SharePoint column, and it will be picked up immediately.
+call for that field in `mapRowToProject()` (`src/utils/dataParser.ts` — shared by the
+SharePoint fetch and the manual CSV/Excel loader in §7, so one addition covers both) rather
+than renaming the SharePoint column, and it will be picked up immediately.
 
 **If you're creating a list from scratch**, use the script — it creates every column with a
 clean, space-free internal name up front, so a *new* list never even needs the tolerant
@@ -221,3 +228,37 @@ Other runtime switches: `?debug=1` (layout-violation overlay, dev builds only) a
    presentation mode.
 5. Check a narrow window: Quarter View reflows to a single column. Timeline view is designed
    for desktop widths and scales down proportionally, so it gets small on phones.
+
+---
+
+## 7. Loading data manually (CSV/XLSX) — for when the live list isn't reachable
+
+The **"Load CSV/XLSX"** button (top-right, next to the PDF button) lets anyone load a CSV or
+Excel export of the list directly from disk, entirely offline. This exists specifically for
+the situation in §3's warning box — a live connection blocked by an Embed web part, or a
+`NoScriptSite` restriction nobody's flipped yet (`docs/TECHNICAL.md` §16 has the full story).
+Reading a local file involves no network request at all, so none of that applies here.
+
+**How to use it:**
+
+1. Export the list — SharePoint's own **Export to Excel**, or File → Export → CSV from any
+   list view, both work.
+2. Open the deployed page and click **Load CSV/XLSX**.
+3. Pick the exported file.
+
+The dashboard immediately shows that file's data, and a small banner appears confirming which
+file and when it was loaded. **This is saved in that browser only** — it survives a page
+reload on the same device, but has no effect on what anyone else sees; each viewer's loaded
+file is their own. Click **"Use live data"** in the banner to discard it and go back to
+trying the real list.
+
+**Column matching works exactly like the live list** (§2's table above) — a column titled
+"Task Name" or "Risks / Issues" in the exported file is recognised the same way it would be
+over the REST API, since both paths share one mapping (`mapRowToProject` in
+`src/utils/dataParser.ts`).
+
+**This is a manual, per-person workaround, not a live connection** — it will not auto-refresh,
+and everyone who wants current data has to repeat these steps themselves with a fresh export.
+If that's not convenient enough for how this needs to be used day-to-day, the real fix is
+getting §3's `NoScriptSite` change made (the fastest path to a genuinely live dashboard), or
+automating a scheduled re-export/rebuild — ask if you want to explore that.
