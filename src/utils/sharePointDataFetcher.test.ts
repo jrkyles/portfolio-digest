@@ -64,6 +64,52 @@ describe('fetchProjectData - the sandboxed-iframe blind spot', () => {
   })
 })
 
+describe('fetchProjectData - connectivity probe', () => {
+  it('probes /_api/web (list-independent) after a successful list fetch, and logs the site it reached', async () => {
+    ;(window as any)._spPageContextInfo = {}
+    const calledUrls: string[] = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      calledUrls.push(String(url))
+      if (String(url).includes('/_api/web/lists')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { results: [] } }) })
+      }
+      if (String(url).includes('/_api/web?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { Title: 'Innovation Site', Url: 'https://contoso.sharepoint.com/sites/Innovation', ServerRelativeUrl: '/sites/Innovation' } }) })
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await fetchProjectData()
+
+    expect(calledUrls.some((u) => u.includes('/_api/web?'))).toBe(true)
+    // The list URL is still the FIRST call - the probe fires after it, not before, so existing
+    // assumptions about call order elsewhere aren't disturbed by adding this probe.
+    expect(calledUrls[0]).toContain('/_api/web/lists')
+    expect(logSpy.mock.calls.some((args) => String(args[0]).includes('Connectivity probe SUCCEEDED'))).toBe(true)
+    logSpy.mockRestore()
+  })
+
+  it('also probes after a FAILED list fetch, to distinguish "can\'t reach SharePoint at all" from "this list doesn\'t exist"', async () => {
+    ;(window as any)._spPageContextInfo = {}
+    const calledUrls: string[] = []
+    global.fetch = vi.fn().mockImplementation((url) => {
+      calledUrls.push(String(url))
+      if (String(url).includes('/_api/web/lists')) {
+        return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found', text: () => Promise.resolve('{"error":{"message":{"value":"List does not exist."}}}') })
+      }
+      if (String(url).includes('/_api/web?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { Title: 'Innovation Site', Url: 'https://contoso.sharepoint.com/sites/Innovation', ServerRelativeUrl: '/sites/Innovation' } }) })
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })
+    })
+
+    await fetchProjectData()
+
+    expect(calledUrls.some((u) => u.includes('/_api/web?'))).toBe(true)
+  })
+})
+
 describe('fetchProjectData', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(SAMPLE_CSV) })

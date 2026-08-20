@@ -42,8 +42,62 @@ export const EMBEDDED_SAMPLE_ID = 'embedded-sample-data'
 type SharePointListItem = Record<string, any>
 
 /**
+ * A lightweight, LIST-INDEPENDENT connectivity check: `/_api/web` just returns basic site info
+ * and requires no knowledge of any list name, so it answers a narrower question than "did
+ * fetching the list work" - is the relative `/_api/...` URL reaching a real, signed-in
+ * SharePoint session AT ALL, and if so, which site? That's worth knowing on its own, because
+ * "the list call failed" is consistent with several completely different problems that need
+ * different fixes:
+ *   - not reaching SharePoint at all (wrong origin, blocked request, not actually on SharePoint)
+ *   - reaching SharePoint but not signed in (no session cookie in this context)
+ *   - reaching the WRONG site (a relative URL resolving against an unexpected base)
+ *   - reaching the right site, but this specific list name doesn't exist there
+ * This probe rules the first three in or out before anything list-specific is even considered.
+ * Purely diagnostic - never throws, has no effect on the returned data, and every branch is a
+ * `console.log`/`console.warn`.
+ */
+async function probeSharePointConnectivity(): Promise<void> {
+  const url = '/_api/web?$select=Title,Url,ServerRelativeUrl'
+  console.log(`[SharePoint] Connectivity probe: GET ${url}`)
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json;odata=verbose' },
+    })
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => '')
+      console.warn(
+        `[SharePoint] Connectivity probe FAILED: ${response.status} ${response.statusText}. ` +
+        'This means the app cannot reach SharePoint\'s REST API at all from this page - a ' +
+        'list-specific fix will not help until this succeeds.',
+        bodyText ? `Body: ${bodyText.slice(0, 300)}` : ''
+      )
+      return
+    }
+    const data = await response.json()
+    const site = data?.d
+    console.log(
+      '%c[SharePoint] Connectivity probe SUCCEEDED - this page can reach a real, signed-in SharePoint site:',
+      'font-weight:bold;color:#2e7d32',
+      { Title: site?.Title, Url: site?.Url, ServerRelativeUrl: site?.ServerRelativeUrl }
+    )
+    console.log(
+      '[SharePoint] If the list itself still isn\'t showing up, compare the "Url" above against ' +
+      'the site you expect this list to live on - a mismatch here means the relative /_api/... ' +
+      'URL is resolving against the wrong site, which no list-name fix can correct.'
+    )
+  } catch (err) {
+    console.warn(
+      '[SharePoint] Connectivity probe THREW (not just a non-OK response) - most likely a ' +
+      'network-level failure, a CORS block, or this genuinely is not a SharePoint origin at all:',
+      err
+    )
+  }
+}
+
+/**
  * Fetch projects from SharePoint list using REST API
- * 
+ *
  * @param listName - Display title of the SharePoint list
  * @returns Array of Project objects
  */
@@ -426,9 +480,16 @@ export async function fetchProjectData(listName: string = DEFAULT_LIST_NAME): Pr
           '(e.g. SharePoint\'s Embed web part), where the context signals above cannot fire.'
     )
     try {
-      return await fetchSharePointListData(resolvedListName)
+      const result = await fetchSharePointListData(resolvedListName)
+      // Fired AFTER the real list call, not before - keeps the list request itself the first
+      // network call either way, and this purely-diagnostic probe never blocks or alters the
+      // actual data being returned. Run even on success: confirming WHICH site was reached is
+      // useful independent of whether the list happened to be found there.
+      await probeSharePointConnectivity()
+      return result
     } catch (error) {
       console.warn('[Data] SharePoint API call failed - falling back to sample data. Real error:', error)
+      await probeSharePointConnectivity()
       // Fall through to sample-data fallback
     }
   } else {
