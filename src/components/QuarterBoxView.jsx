@@ -160,15 +160,22 @@ const QuarterBox = forwardRef(function QuarterBox(
       className="relative rounded-lg border border-neutral-200 flex flex-col"
       style={{
         backgroundColor: '#dfe3e8',
-        // Lowered further still (was 220/420, before that 320/520) - shorter boxes leave
-        // more room for the popup on the right to grow larger without feeling cramped.
-        minHeight: zoomed ? 480 : 160,
-        maxHeight: zoomed ? '80vh' : 320,
+        // Raised a bit off the previous 160/320 floor - still short of the older 220/420 (or
+        // 320/520 before that), which left the popup on the right cramped, but the boxes were
+        // reading too short.
+        minHeight: zoomed ? 480 : 190,
+        maxHeight: zoomed ? '80vh' : 360,
         cursor: zoomed ? 'default' : 'pointer',
         boxShadow: zoomed ? '0 24px 64px -12px rgba(10, 37, 62, 0.35)' : 'none',
         transition: 'box-shadow 0.2s ease',
       }}
     >
+      {/* pointer-events-none because this sits ABOVE the cards in stacking order (it's the
+          later sibling among two absolutely/non-positioned elements in the same context) -
+          without it, this label would shadow clicks on whatever card renders underneath it.
+          The card container's own top padding (below) is what actually keeps card TEXT from
+          rendering underneath this label in the first place; pointer-events-none is a second,
+          independent line of defense for interaction, not a substitute for that clearance. */}
       <div
         className="absolute top-3 right-4 pointer-events-none"
         style={{
@@ -209,13 +216,13 @@ const QuarterBox = forwardRef(function QuarterBox(
       <div
         className={
           zoomed
-            ? 'flex-1 overflow-y-auto p-5 pt-14 grid grid-cols-1 sm:grid-cols-2 gap-3 content-start'
-            // A little resting whitespace between cards (not much - `layout` on each card
-            // already reflows siblings smoothly on its own) gives the hover-expand something
-            // to visibly "spend" first: the expanding card's growth reads as consuming that
-            // gap before it noticeably pushes into its neighbors, rather than every card
-            // looking packed edge to edge with no give.
-            : 'flex-1 overflow-y-auto p-4 pt-3 space-y-3'
+            ? 'flex-1 overflow-y-auto p-5 pt-14 grid grid-cols-1 sm:grid-cols-2 gap-3 content-start items-start'
+            // pt-16 (64px), not the original pt-3 - clears the quarter-number label sitting
+            // in the top-right corner. Measured live: the label's own box (top-3 offset +
+            // its 30px glyph height + line-height) actually extends ~58px down from the
+            // box's top edge, so pt-12 (48px) still let the first card's top 9px overlap it;
+            // pt-16 clears that with margin to spare.
+            : 'flex-1 overflow-y-auto p-4 pt-16 space-y-3'
         }
       >
         {projects.length === 0 ? (

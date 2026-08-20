@@ -493,37 +493,35 @@ function App() {
           </div>
         </>
       ) : (
-        // Quarter View layout: two columns, per the original v2 reference's "Portfolio
-        // Digest + popup live on the right" pattern - quarter boxes (naturally narrower,
-        // just from sharing the row) on the left, Portfolio Digest on the right. The right
-        // column is a fixed 260px (flex-shrink/grow both 0) rather than a flex-basis that
-        // competes for space - simpler to reason about and keeps it a predictable width for
-        // the two-line centered heading regardless of how wide the left column's own content
-        // grows. flexWrap stays on purely as a true-mobile fallback (drops the column below
-        // the grid entirely) - this app is headed for a SharePoint page embed, whose content
-        // column can run narrower than a full desktop viewport.
-        <div style={{ display: 'flex', gap: 'clamp(16px, 3vw, 32px)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 360px', minWidth: 0 }}>
+        // Quarter View layout: two columns via CSS Grid, not flex - specifically so PD's row
+        // can start at the exact same y as the quarter-box grid with no hand-picked marginTop
+        // guess. Row 1 holds only the left column's header (seal+eyebrow row); its real
+        // rendered height is whatever sets where row 2 begins, and PD sits in row 2 directly
+        // opposite the boxes - alignment falls out of the grid itself rather than needing to
+        // be measured or guessed at any viewport width.
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 360px',
+            columnGap: 'clamp(16px, 3vw, 32px)',
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ gridColumn: 1, gridRow: 1, marginBottom: 'clamp(20px, 3vw, 40px)' }}>
             {quarterHeaderRow}
-            <div style={{ marginBottom: 'clamp(20px, 3vw, 40px)' }} />
-            {mainContent}
           </div>
+          <div style={{ gridColumn: 1, gridRow: 2, minWidth: 0 }}>{mainContent}</div>
           <div
             ref={brandColumnRef}
             className="mb-8 sm:mb-12 md:mb-16"
-            style={{ flex: '0 0 300px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left' }}
+            style={{ gridColumn: 2, gridRow: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left' }}
           >
             <div
               style={{
                 fontFamily: 'Georgia, serif',
                 fontWeight: 400,
-                fontSize: 'clamp(32px, 4vw, 48px)',
+                fontSize: 'clamp(48px, 6vw, 76px)',
                 lineHeight: 1.1,
-                // Pushes the heading down from the very top of the column - well past the
-                // seal+eyebrow row's own height, but nowhere near halfway, since most of the
-                // column's height below needs to stay clear for the popup (see popupAnchor/
-                // DetailPanel) that appears underneath it.
-                marginTop: 'clamp(24px, 6vw, 88px)',
               }}
             >
               <motion.div
@@ -563,7 +561,10 @@ function App() {
                     // breathing room between the two.
                     bottom: '-0.55em',
                     transform: 'translateX(-50%)',
-                    fontSize: 15,
+                    // Kept at the same ~0.32 ratio to the heading's own clamp() as it grew
+                    // (48-76 now, was 40-64) so "2026" scales in step with "Digest" instead
+                    // of looking unchanged - and proportionally shrunk - next to it.
+                    fontSize: 'clamp(15px, 1.9vw, 24px)',
                     zIndex: -1,
                   }}
                 >

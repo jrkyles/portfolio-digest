@@ -383,14 +383,16 @@ export default function PresentationMode({ projects, index, originRect, onNaviga
               type="button" onClick={onClose} aria-label="Exit presentation mode"
               className="absolute rounded-full hover:bg-neutral-100"
               style={{ top: 18, right: 18, padding: 9, cursor: 'pointer', zIndex: 4 }}
+              onPointerEnter={resetTilt}
+              onPointerMove={(e) => e.stopPropagation()}
             >
               <X className="w-6 h-6 text-neutral-500" />
             </button>
 
-            <NavButton side="left"  onClick={() => step(-1)} label="Previous task">
+            <NavButton side="left" onClick={() => step(-1)} label="Previous task" onSteady={resetTilt}>
               <ChevronLeft className="w-7 h-7" />
             </NavButton>
-            <NavButton side="right" onClick={() => step(1)} label="Next task">
+            <NavButton side="right" onClick={() => step(1)} label="Next task" onSteady={resetTilt}>
               <ChevronRight className="w-7 h-7" />
             </NavButton>
           </motion.div>
@@ -428,8 +430,14 @@ function Block({ icon, title, color, children }) {
 
 /** Bare chevrons - no plate, border or shadow. They sit INSIDE the card's own horizontal
  *  padding (which is floored at 64px specifically to hold them), so the card edge stays a
- *  clean rectangle, the controls read as part of it, and nothing ever overlaps the content. */
-function NavButton({ side, onClick, label, children }) {
+ *  clean rectangle, the controls read as part of it, and nothing ever overlaps the content.
+ *
+ *  `onSteady` (wired to the tilt layer's resetTilt) fires on pointer-enter and the move
+ *  handler stops the event bubbling up to that same layer's onPointerMove - without both,
+ *  the card keeps re-tilting off the still-moving pointer right up until the click, and
+ *  because these sit near the card's edge (side: 6) where 3D perspective displacement is
+ *  largest, that drift was enough to carry the button out from under the cursor mid-click. */
+function NavButton({ side, onClick, label, onSteady, children }) {
   return (
     <button
       type="button" onClick={onClick} aria-label={label}
@@ -440,6 +448,8 @@ function NavButton({ side, onClick, label, children }) {
         background: 'none', border: 'none', padding: 0,
         cursor: 'pointer', zIndex: 4, transition: 'color .15s ease',
       }}
+      onPointerEnter={onSteady}
+      onPointerMove={(e) => e.stopPropagation()}
     >
       {children}
     </button>

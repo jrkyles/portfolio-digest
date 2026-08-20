@@ -311,7 +311,81 @@ describe('fetchSharePointListData', () => {
     const projects = await fetchSharePointListData('Projects')
     expect(projects).toHaveLength(2)
     expect(projects.map(p => p.Project)).toEqual(['Document Intake Automation', 'Vendor Evaluation Scorecard'])
-    expect(calledUrls).toEqual(['/_api/web/lists/getbytitle(\'Projects\')/items?$top=5000', 'https://example.sharepoint.com/next-page'])
+    // Just the first two calls, in order - a third (the /fields lookup, covered separately
+    // below) now also fires once items are in hand, so this no longer asserts the full array.
+    expect(calledUrls[0]).toBe('/_api/web/lists/getbytitle(\'Projects\')/items?$top=5000')
+    expect(calledUrls[1]).toBe('https://example.sharepoint.com/next-page')
+  })
+})
+
+describe('fetchSharePointListData - internal names with no textual relationship to their title', () => {
+  // Confirmed in the wild: a column renamed after creation keeps its ORIGINAL internal name
+  // forever (SharePoint never updates it), which can be an opaque placeholder like `field_0`
+  // with nothing in common with its current display title "Status" - unescapeSharePointName
+  // only reverses `_xHHHH_` character escaping, so no amount of tolerant text matching can
+  // recover this; only the list's own /fields metadata can.
+  it('recovers real columns via the list\'s /fields metadata when internal names are opaque placeholders', async () => {
+    global.fetch = vi.fn().mockImplementation((url) => {
+      const u = String(url)
+      if (u.includes('/fields')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            d: {
+              results: [
+                { InternalName: 'Title', Title: 'Title' },
+                { InternalName: 'field_0', Title: 'Status' },
+                { InternalName: 'field_1', Title: 'Team' },
+                { InternalName: 'field_11', Title: 'Effort' },
+              ],
+            },
+          }),
+        })
+      }
+      if (u.includes('/items')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            d: {
+              results: [
+                { Title: 'BCO Liaison (Ongoing)', Quarter: '2', field_0: 'In Progress', field_1: 'IO', field_11: 'Low' },
+              ],
+            },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { results: [] } }) })
+    })
+
+    const projects = await fetchSharePointListData('Status Report Tracking Information')
+    expect(projects).toEqual([
+      expect.objectContaining({
+        Project: 'BCO Liaison (Ongoing)',
+        Quarter: 'Qtr 2',
+        Status: 'In Progress',
+        Team: 'IO',
+        Effort: 'Low',
+      }),
+    ])
+  })
+
+  it('falls back to raw internal names, without crashing or losing already-matching columns, when the /fields request itself fails', async () => {
+    global.fetch = vi.fn().mockImplementation((url) => {
+      const u = String(url)
+      if (u.includes('/fields')) {
+        return Promise.resolve({ ok: false, status: 403, statusText: 'Forbidden', text: () => Promise.resolve('') })
+      }
+      if (u.includes('/items')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ d: { results: [{ Project: 'Still Works', Team: 'IO', Quarter: 'Qtr 1' }] } }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ d: { results: [] } }) })
+    })
+
+    const projects = await fetchSharePointListData('Status Report Tracking Information')
+    expect(projects).toEqual([expect.objectContaining({ Project: 'Still Works', Team: 'IO' })])
   })
 })
 

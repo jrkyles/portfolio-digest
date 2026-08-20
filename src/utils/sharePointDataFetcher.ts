@@ -98,6 +98,73 @@ async function probeSharePointConnectivity(): Promise<void> {
 }
 
 /**
+ * Maps a list's raw internal field names to their human-readable display Titles, fetched from
+ * the list's own field definitions. This is the ONLY reliable way to recover a display name
+ * from an internal name for a column whose internal name is NOT a lightly-escaped version of
+ * its title - confirmed in the wild as `field_0`, `field_1`, `field_11`, etc. on a real list,
+ * which happens whenever a column was renamed after creation (SharePoint keeps a column's
+ * FIRST internal name forever, independent of later renames). unescapeSharePointName (see
+ * dataParser.ts) only reverses `_xHHHH_` character escaping - there is no textual relationship
+ * between "field_0" and "Status" for it to undo.
+ *
+ * Best-effort and never throws: every ingestion path already works fine from raw internal
+ * names when a column's internal name DOES resemble its title (the common case), so a failure
+ * here (e.g. a permissions edge case on the /fields endpoint) degrades back to that instead of
+ * breaking the whole fetch.
+ */
+async function fetchListFieldTitleMap(listName: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  try {
+    const url = `/_api/web/lists/getbytitle('${listName}')/fields?$select=InternalName,Title,Hidden&$filter=Hidden eq false`
+    console.log(`[SharePoint] GET ${url}`)
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json;odata=verbose' },
+    })
+    if (!response.ok) {
+      console.warn(
+        `[SharePoint] Could not fetch field definitions (${response.status} ${response.statusText}) - ` +
+        'falling back to raw internal names, which only match when a column\'s internal name ' +
+        'already resembles its display title.'
+      )
+      return map
+    }
+    const data = await response.json()
+    const fields = (data?.d?.results as { InternalName?: string; Title?: string }[]) || []
+    for (const field of fields) {
+      if (field.InternalName && field.Title && field.InternalName !== field.Title) {
+        map.set(field.InternalName, field.Title)
+      }
+    }
+    if (map.size > 0) {
+      console.log(
+        `[SharePoint] ${map.size} column(s) have an internal name that differs from their display title:`,
+        Object.fromEntries(map)
+      )
+    }
+  } catch (err) {
+    console.warn('[SharePoint] Field-definitions request threw - falling back to raw internal names:', err)
+  }
+  return map
+}
+
+/**
+ * Renames a row's keys from internal name to display Title wherever the two differ (see
+ * fetchListFieldTitleMap) - e.g. a raw `field_0: "In Progress"` becomes `Status: "In Progress"`,
+ * which is what lets mapRowToProject's ordinary title-based candidate matching find it at all.
+ * Keys with no mapping (already title-like, or a system/OData property `/fields` doesn't
+ * describe) pass through unchanged.
+ */
+function applyFieldTitleMap(item: SharePointListItem, titleMap: Map<string, string>): SharePointListItem {
+  if (titleMap.size === 0) return item
+  const remapped: SharePointListItem = {}
+  for (const [key, value] of Object.entries(item)) {
+    remapped[titleMap.get(key) ?? key] = value
+  }
+  return remapped
+}
+
+/**
  * Fetch projects from SharePoint list using REST API
  *
  * @param listName - Display title of the SharePoint list
@@ -167,6 +234,19 @@ export async function fetchSharePointListData(listName: string = DEFAULT_LIST_NA
     }
 
     console.log(`[SharePoint] Fetched ${items.length} item(s) across ${pageCount} page(s)`)
+
+    // Recover display titles for columns whose internal name doesn't resemble them at all
+    // (see fetchListFieldTitleMap) - only worth the extra request if there's actually
+    // something to remap. A no-op (empty map) is exactly as cheap as skipping this.
+    let titleMap = new Map<string, string>()
+    if (items.length > 0) {
+      titleMap = await fetchListFieldTitleMap(listName)
+      if (titleMap.size > 0) {
+        for (let i = 0; i < items.length; i++) {
+          items[i] = applyFieldTitleMap(items[i], titleMap)
+        }
+      }
+    }
 
     if (items.length === 0) {
       console.warn(
